@@ -582,6 +582,14 @@
                 <div class="panel-section">
                     <div class="section-title">Integrazioni</div>
                     <div class="input-group">
+                        <label for="tmdbApiKey">TMDB API Key (opzionale)</label>
+                        <input type="text" id="tmdbApiKey" placeholder="Usa la tua chiave TMDB personale...">
+                        <div class="input-hint">
+                            Se impostata, l'addon usera la tua chiave TMDB per questo link configurato.
+                            <a href="https://www.themoviedb.org/settings/api" target="_blank">Crea una chiave su themoviedb.org</a>
+                        </div>
+                    </div>
+                    <div class="input-group" style="margin-top: 1rem;">
                         <label for="topStreamingKey">Top Poster API Key</label>
                         <input type="text" id="topStreamingKey" placeholder="Incolla la tua chiave qui...">
                         <div class="input-hint">
@@ -855,7 +863,9 @@
 
         function getConfiguration() {
             const config = {};
+            const tmdbApiKey = document.getElementById('tmdbApiKey').value.trim();
             const key = document.getElementById('topStreamingKey').value.trim();
+            if (tmdbApiKey) config.tmdbApiKey = tmdbApiKey;
             if (key) config.topStreamingKey = key;
             
             const catalogs = [];

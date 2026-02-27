@@ -74,6 +74,31 @@ function getConfigHash(config) {
     return crypto.createHash("sha256").update(JSON.stringify(config)).digest("hex").slice(0, 16);
 }
 
+const CACHE_TTL_SECONDS = {
+    metaMovie: 12 * 3600,  // 12 hours
+    metaSeries: 3 * 3600,  // 3 hours
+    detailsMovie: 24 * 3600, // 24 hours
+    detailsSeries: 6 * 3600, // 6 hours
+    providers: 12 * 3600 // 12 hours
+};
+const NEGATIVE_CACHE_TTL_SECONDS = 5 * 60; // 5 minutes
+const CACHE_TTL_JITTER_PERCENT = 0.15; // +/-15%
+const NEGATIVE_CACHE_MARKER = "__negative_cache__";
+
+function withTtlJitter(baseTtlSeconds, jitterPercent = CACHE_TTL_JITTER_PERCENT) {
+    const delta = Math.floor(baseTtlSeconds * jitterPercent);
+    const jitter = Math.floor((Math.random() * ((delta * 2) + 1)) - delta);
+    return Math.max(60, baseTtlSeconds + jitter);
+}
+
+function createNegativeCache(reason) {
+    return { [NEGATIVE_CACHE_MARKER]: true, reason, ts: Date.now() };
+}
+
+function isNegativeCache(value) {
+    return !!(value && typeof value === "object" && value[NEGATIVE_CACHE_MARKER] === true);
+}
+
 async function getImdbRating(imdbId, type) {
     if (!imdbId) return null;
     try {
@@ -112,116 +137,130 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
             const typePath = tmdbType === "movie" ? "movie" : "tv";
             const cacheKey = `tmdb:details:${typePath}:${item.id}`;
             let details = await cache.get(cacheKey);
+            if (isNegativeCache(details)) {
+                details = null;
+            }
 
             if (!details) {
                 // Fetch external_ids, credits, and images in one go
-                const detailsUrl = `${BASE_URL}/${typePath}/${item.id}?api_key=${TMDB_API_KEY}&language=it-IT&append_to_response=external_ids,credits,images,videos,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+                const detailsUrl = `${BASE_URL}/${typePath}/${item.id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=external_ids,credits,images,videos,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
                 
                 const detailsRes = await fetch(detailsUrl);
                 details = await detailsRes.json();
                 
                 if (details && !details.status_message) {
-                    await cache.set(cacheKey, details, 86400 * 3); // 3 days
+                    const detailsTtl = tmdbType === "movie" ? CACHE_TTL_SECONDS.detailsMovie : CACHE_TTL_SECONDS.detailsSeries;
+                    await cache.set(cacheKey, details, withTtlJitter(detailsTtl));
+                } else {
+                    await cache.set(cacheKey, createNegativeCache("details_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+                    details = null;
                 }
             }
             
-            // Improved Series Release Info
-            if (tmdbType === "movie" && details.release_dates && details.release_dates.results) {
-                const itRelease = details.release_dates.results.find(r => r.iso_3166_1 === "IT");
-                if (itRelease && itRelease.release_dates && itRelease.release_dates.length > 0) {
-                     const theatrical = itRelease.release_dates.find(d => d.type === 3);
-                     if (theatrical) {
-                         exactReleaseDate = theatrical.release_date.split('T')[0];
-                     } else {
-                         exactReleaseDate = itRelease.release_dates[0].release_date.split('T')[0];
-                     }
-                }
-            } else if (stremioType === "series") {
-                if (details.next_episode_to_air) {
-                    exactReleaseDate = details.next_episode_to_air.air_date;
-                } else if (details.last_air_date) {
-                    exactReleaseDate = details.last_air_date;
-                }
-            }
-
-            // Update releaseInfo to full date for movies (to show "2026-02-27" instead of "2026")
-            if (tmdbType === "movie" && exactReleaseDate) {
-                releaseInfo = exactReleaseDate;
-            }
-
-            if (stremioType === "series" && releaseInfo) {
-                if (details.in_production) {
-                    releaseInfo = `${releaseInfo}-`;
-                } else if (details.last_air_date) {
-                    const endYear = details.last_air_date.split("-")[0];
-                    if (endYear && endYear !== releaseInfo) {
-                        releaseInfo = `${releaseInfo}-${endYear}`;
-                    }
-                }
-            }
-            
-            // STRICT RELEASE DATE FILTER (Only for Movies)
-            if (tmdbType === "movie" && !allowFuture && !skipRegionCheck) {
-                let hasValidRelease = false;
-                if (details.release_dates && details.release_dates.results) {
+            if (details) {
+                // Improved Series Release Info
+                if (tmdbType === "movie" && details.release_dates && details.release_dates.results) {
                     const itRelease = details.release_dates.results.find(r => r.iso_3166_1 === "IT");
-                    if (itRelease && itRelease.release_dates) {
-                        // Check if any release date in Italy is <= today
-                        const today = new Date().toISOString().split('T')[0];
-                        const valid = itRelease.release_dates.some(d => {
-                            // Type 3 is Theatrical, 4 is Digital. 
-                            // But we accept any release type as long as it happened in Italy.
-                            // However, to be strict, we check the date.
-                            return d.release_date && d.release_date.split('T')[0] <= today;
-                        });
-                        if (valid) hasValidRelease = true;
+                    if (itRelease && itRelease.release_dates && itRelease.release_dates.length > 0) {
+                         const theatrical = itRelease.release_dates.find(d => d.type === 3);
+                         if (theatrical) {
+                             exactReleaseDate = theatrical.release_date.split('T')[0];
+                         } else {
+                             exactReleaseDate = itRelease.release_dates[0].release_date.split('T')[0];
+                         }
+                    }
+                } else if (stremioType === "series") {
+                    if (details.next_episode_to_air) {
+                        exactReleaseDate = details.next_episode_to_air.air_date;
+                    } else if (details.last_air_date) {
+                        exactReleaseDate = details.last_air_date;
                     }
                 }
+
+                // Update releaseInfo to full date for movies (to show "2026-02-27" instead of "2026")
+                if (tmdbType === "movie" && exactReleaseDate) {
+                    releaseInfo = exactReleaseDate;
+                }
+
+                if (stremioType === "series" && releaseInfo) {
+                    if (details.in_production) {
+                        releaseInfo = `${releaseInfo}-`;
+                    } else if (details.last_air_date) {
+                        const endYear = details.last_air_date.split("-")[0];
+                        if (endYear && endYear !== releaseInfo) {
+                            releaseInfo = `${releaseInfo}-${endYear}`;
+                        }
+                    }
+                }
+            
+                // STRICT RELEASE DATE FILTER (Only for Movies)
+                if (tmdbType === "movie" && !allowFuture && !skipRegionCheck) {
+                    let hasValidRelease = false;
+                    if (details.release_dates && details.release_dates.results) {
+                        const itRelease = details.release_dates.results.find(r => r.iso_3166_1 === "IT");
+                        if (itRelease && itRelease.release_dates) {
+                            // Check if any release date in Italy is <= today
+                            const today = new Date().toISOString().split('T')[0];
+                            const valid = itRelease.release_dates.some(d => {
+                                // Type 3 is Theatrical, 4 is Digital. 
+                                // But we accept any release type as long as it happened in Italy.
+                                // However, to be strict, we check the date.
+                                return d.release_date && d.release_date.split('T')[0] <= today;
+                            });
+                            if (valid) hasValidRelease = true;
+                        }
+                    }
                 
-                if (!hasValidRelease) {
-                    // If no valid IT release found, return null to filter this item out
-                    return null;
-                }
-            }
-
-            // STRICT REGION AVAILABILITY FILTER (Only for TV series when requested)
-            if (tmdbType === "tv" && seriesAvailabilityRegion) {
-                const providersCacheKey = `tmdb:watchproviders:tv:${item.id}`;
-                let providersData = await cache.get(providersCacheKey);
-                if (!providersData) {
-                    const providersUrl = `${BASE_URL}/tv/${item.id}/watch/providers?api_key=${TMDB_API_KEY}`;
-                    const providersRes = await fetch(providersUrl);
-                    providersData = await providersRes.json();
-                    if (providersData && !providersData.status_message) {
-                        await cache.set(providersCacheKey, providersData, 86400 * 3); // 3 days
+                    if (!hasValidRelease) {
+                        // If no valid IT release found, return null to filter this item out
+                        return null;
                     }
                 }
 
-                const hasRegionAvailability = providersData &&
-                    providersData.results &&
-                    providersData.results[seriesAvailabilityRegion];
-                if (!hasRegionAvailability) {
-                    return null;
+                // STRICT REGION AVAILABILITY FILTER (Only for TV series when requested)
+                if (tmdbType === "tv" && seriesAvailabilityRegion) {
+                    const providersCacheKey = `tmdb:watchproviders:tv:${item.id}`;
+                    let providersData = await cache.get(providersCacheKey);
+                    if (isNegativeCache(providersData)) {
+                        providersData = null;
+                    }
+                    if (!providersData) {
+                        const providersUrl = `${BASE_URL}/tv/${item.id}/watch/providers?api_key=${getTmdbApiKey()}`;
+                        const providersRes = await fetch(providersUrl);
+                        providersData = await providersRes.json();
+                        if (providersData && !providersData.status_message) {
+                            await cache.set(providersCacheKey, providersData, withTtlJitter(CACHE_TTL_SECONDS.providers));
+                        } else {
+                            await cache.set(providersCacheKey, createNegativeCache("providers_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+                            providersData = null;
+                        }
+                    }
+
+                    const hasRegionAvailability = providersData &&
+                        providersData.results &&
+                        providersData.results[seriesAvailabilityRegion];
+                    if (!hasRegionAvailability) {
+                        return null;
+                    }
                 }
-            }
             
-            if (details.external_ids && details.external_ids.imdb_id) {
-                imdbId = details.external_ids.imdb_id;
-                // Add IMDb Link for Rating Badge
-                links.push({
-                    name: item.vote_average ? item.vote_average.toFixed(1) : "N/A",
-                    category: "imdb",
-                    url: `https://imdb.com/title/${imdbId}`
-                });
-            }
+                if (details.external_ids && details.external_ids.imdb_id) {
+                    imdbId = details.external_ids.imdb_id;
+                    // Add IMDb Link for Rating Badge
+                    links.push({
+                        name: item.vote_average ? item.vote_average.toFixed(1) : "N/A",
+                        category: "imdb",
+                        url: `https://imdb.com/title/${imdbId}`
+                    });
+                }
             
-            if (details.belongs_to_collection) {
-                links.push({
-                    name: details.belongs_to_collection.name,
-                    category: "Collection",
-                    url: `stremio:///search?search=${encodeURIComponent(details.belongs_to_collection.name)}`
-                });
-            }
+                if (details.belongs_to_collection) {
+                    links.push({
+                        name: details.belongs_to_collection.name,
+                        category: "Collection",
+                        url: `stremio:///search?search=${encodeURIComponent(details.belongs_to_collection.name)}`
+                    });
+                }
 
             if (details.production_companies) {
                 details.production_companies.slice(0, 2).forEach(c => {
@@ -302,8 +341,8 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                     }
             }
 
-            // Extract Trailers from TMDB (only if available, no YT fallback to avoid slow catalog)
-            if (details.videos && details.videos.results && details.videos.results.length > 0) {
+                // Extract Trailers from TMDB (only if available, no YT fallback to avoid slow catalog)
+                if (details.videos && details.videos.results && details.videos.results.length > 0) {
                 // Filter for Trailers on YouTube
                 const tmdbTrailers = details.videos.results.filter(v => v.site === "YouTube" && v.type === "Trailer");
                 
@@ -333,6 +372,7 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                             ytId: t.key
                         });
                     });
+                }
                 }
             }
 
@@ -389,8 +429,17 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
     return metaObjects.filter(m => m !== null);
 }
 
-const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
+const DEFAULT_TMDB_API_KEY = process.env.TMDB_API_KEY || "68e094699525b18a70bab2f86b1fa706";
 const BASE_URL = "https://api.themoviedb.org/3";
+
+function getTmdbApiKey() {
+    const store = storage.getStore();
+    const customKey = store && store.config && typeof store.config.tmdbApiKey === "string"
+        ? store.config.tmdbApiKey.trim()
+        : "";
+    const isValidFormat = /^[a-f0-9]{32}$/i.test(customKey);
+    return (isValidFormat ? customKey : "") || DEFAULT_TMDB_API_KEY;
+}
 
 const MOVIE_GENRES = {
     "Azione": 28, "Avventura": 12, "Animazione": 16, "Commedia": 35,
@@ -780,6 +829,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
     const cacheKey = `meta_v3:${type}:${id}:${configHash}`;
     
     const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return { meta: {} };
     if (cached) return { meta: cached };
     
     let tmdbId = id;
@@ -788,15 +838,15 @@ builder.defineMetaHandler(async ({ type, id }) => {
     
     let url = "";
     if (id.startsWith("tt")) {
-        url = `${BASE_URL}/find/${id}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+        url = `${BASE_URL}/find/${id}?api_key=${getTmdbApiKey()}&external_source=imdb_id`;
     } else if (id.startsWith("tmdb:")) {
         tmdbId = id.split(":")[1];
-        url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_API_KEY}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+        url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${tmdbId}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
     } else {
         // Assume it is a raw TMDB ID if it's just numbers, though Stremio usually prefixes.
         // But if it comes from our catalog, it might be prefixed.
         // Let's assume standard TMDB ID for safety if numeric.
-         url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${id}?api_key=${TMDB_API_KEY}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+         url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
     }
 
     try {
@@ -811,7 +861,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
              if (results && results.length > 0) {
                  const item = results[0];
                 // Now fetch full details
-                const detailsUrl = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${item.id}?api_key=${TMDB_API_KEY}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+                const detailsUrl = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${item.id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
                 const detailsRes = await fetch(detailsUrl);
                 const details = await detailsRes.json();
                  meta = await transformToMeta(details, type);
@@ -821,14 +871,17 @@ builder.defineMetaHandler(async ({ type, id }) => {
         }
 
         if (meta) {
-            await cache.set(cacheKey, meta, 86400 * 3); // Cache for 3 days
+            const metaTtl = type === "movie" ? CACHE_TTL_SECONDS.metaMovie : CACHE_TTL_SECONDS.metaSeries;
+            await cache.set(cacheKey, meta, withTtlJitter(metaTtl));
             return { meta };
         } else {
+            await cache.set(cacheKey, createNegativeCache("meta_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
             return { meta: {} };
         }
 
     } catch (e) {
         console.error(`[TMDB Addon] Meta Error: ${e.message}`);
+        await cache.set(cacheKey, createNegativeCache("meta_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
         return { meta: {} };
     }
 });
@@ -953,7 +1006,7 @@ async function transformToMeta(item, type) {
             const seasonPromises = item.seasons.map(season => {
                  // Skip seasons with 0 episodes if likely placeholder, but keep specials (season 0) if they have content
                  if (season.episode_count === 0) return null; 
-                 const seasonUrl = `${BASE_URL}/tv/${item.id}/season/${season.season_number}?api_key=${TMDB_API_KEY}&language=it-IT`;
+                 const seasonUrl = `${BASE_URL}/tv/${item.id}/season/${season.season_number}?api_key=${getTmdbApiKey()}&language=it-IT`;
                  return fetch(seasonUrl).then(res => res.json()).catch(e => null);
             }).filter(Boolean);
 
@@ -1116,7 +1169,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
     
     try {
         let endpoint = null;
-        let queryParams = `api_key=${TMDB_API_KEY}&language=it-IT`;
+        let queryParams = `api_key=${getTmdbApiKey()}&language=it-IT`;
 
         // Handle Search
         if (extra && typeof extra.search === "string" && extra.search.trim().length > 0) {
@@ -1130,7 +1183,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
             try {
                 // 1. Search Content (Movie/TV)
-                const contentRes = await fetch(`${BASE_URL}/search/${tmdbType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=it-IT`);
+                const contentRes = await fetch(`${BASE_URL}/search/${tmdbType}?api_key=${getTmdbApiKey()}&query=${encodeURIComponent(query)}&language=it-IT`);
                 const contentData = await contentRes.json();
                 if (contentData.results) {
                     contentData.results.forEach(item => {
@@ -1154,13 +1207,13 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
                 // 2. Search Person (to get their credits) - Skip for Anime Search to be strict
                 if (!isAnimeSearch) {
-                    const peopleRes = await fetch(`${BASE_URL}/search/person?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}`);
+                    const peopleRes = await fetch(`${BASE_URL}/search/person?api_key=${getTmdbApiKey()}&query=${encodeURIComponent(query)}`);
                     const peopleData = await peopleRes.json();
                     if (peopleData.results && peopleData.results.length > 0) {
                         // Take top person
                         const person = peopleData.results[0];
                         // Fetch credits
-                        const creditsUrl = `${BASE_URL}/person/${person.id}/${tmdbType === "movie" ? "movie_credits" : "tv_credits"}?api_key=${TMDB_API_KEY}&language=it-IT`;
+                        const creditsUrl = `${BASE_URL}/person/${person.id}/${tmdbType === "movie" ? "movie_credits" : "tv_credits"}?api_key=${getTmdbApiKey()}&language=it-IT`;
                         const creditsRes = await fetch(creditsUrl);
                         const creditsData = await creditsRes.json();
                         const castCredits = creditsData.cast || [];
@@ -1654,3 +1707,4 @@ try {
 app.listen(PORT, () => {
     console.log(`Addon active on http://localhost:${PORT}`);
 });
+

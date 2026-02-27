@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  bestia-catalogs:
+  tmdb-it:
     build: .
-    container_name: bestia-catalogs
+    container_name: tmdb-it
     ports:
       - "7171:7171"
     environment:
@@ -21,10 +21,11 @@ services:
 
   redis:
     image: redis:alpine
-    container_name: bestia-redis
+    container_name: tmdb-it-redis
     restart: unless-stopped
     volumes:
       - redis-data:/data
 
 volumes:
   redis-data:
+
