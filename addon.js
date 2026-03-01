@@ -4,76 +4,9 @@ const { AsyncLocalStorage } = require('async_hooks');
 const storage = new AsyncLocalStorage();
 const fetch = require("node-fetch");
 const path = require('path');
-const crypto = require('crypto');
 const cache = require('./database');
 
 const ADDON_URL = process.env.ADDON_URL || "http://localhost:7000";
-const MAX_CONFIG_SEGMENT_LENGTH = 4096;
-const MAX_CONFIG_JSON_LENGTH = 4096;
-const MAX_CATALOG_SELECTIONS = 80;
-const MAX_SEARCH_QUERY_LENGTH = 120;
-const MAX_SEARCH_PERSON_CREDITS = 120;
-const MAX_SEARCH_RESULTS = 60;
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 120;
-const RATE_LIMIT_TRACKED_IPS = 5000;
-const TOP_STREAMING_KEY_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
-
-function getClientIp(req) {
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (typeof forwardedFor === 'string' && forwardedFor.length > 0) {
-        return forwardedFor.split(',')[0].trim();
-    }
-    return req.ip || req.socket.remoteAddress || 'unknown';
-}
-
-function createRateLimiter(windowMs, maxRequests, maxTrackedIps) {
-    const requestsByIp = new Map();
-    let requestsSinceCleanup = 0;
-
-    return (req, res, next) => {
-        const now = Date.now();
-        const ip = getClientIp(req);
-        const current = requestsByIp.get(ip);
-        const freshWindow = !current || now - current.windowStart >= windowMs;
-        const nextCount = freshWindow ? 1 : current.count + 1;
-        requestsByIp.set(ip, {
-            count: nextCount,
-            windowStart: freshWindow ? now : current.windowStart
-        });
-
-        requestsSinceCleanup += 1;
-        if (requestsSinceCleanup >= 1000 || requestsByIp.size > maxTrackedIps) {
-            requestsSinceCleanup = 0;
-            for (const [trackedIp, entry] of requestsByIp.entries()) {
-                if (now - entry.windowStart >= windowMs) {
-                    requestsByIp.delete(trackedIp);
-                }
-            }
-            if (requestsByIp.size > maxTrackedIps) {
-                const oldestIps = [...requestsByIp.entries()]
-                    .sort((a, b) => a[1].windowStart - b[1].windowStart)
-                    .slice(0, requestsByIp.size - maxTrackedIps);
-                oldestIps.forEach(([trackedIp]) => requestsByIp.delete(trackedIp));
-            }
-        }
-
-        if (nextCount > maxRequests) {
-            res.status(429).json({ error: "Too many requests" });
-            return;
-        }
-
-        next();
-    };
-}
-
-function getConfigHash(config) {
-    if (!config || Object.keys(config).length === 0) {
-        return "default";
-    }
-    return crypto.createHash("sha256").update(JSON.stringify(config)).digest("hex").slice(0, 16);
-}
-
 const CACHE_TTL_SECONDS = {
     metaMovie: 12 * 3600,  // 12 hours
     metaSeries: 3 * 3600,  // 3 hours
@@ -512,85 +445,6 @@ Object.entries(SLUG_TO_PROVIDER).forEach(([slug, name]) => {
     PROVIDER_SLUGS[name] = slug;
 });
 
-const STANDARD_CATALOG_MAP = {
-    upcoming_movie: 'tmdb.movie.upcoming',
-    upcoming_series: 'tmdb.series.upcoming',
-    now_playing_movie: 'tmdb.movie.now_playing',
-    popular_movie: 'tmdb.movie.popular',
-    popular_series: 'tmdb.series.popular',
-    trending_movie: 'tmdb.movie.trending',
-    trending_series: 'tmdb.series.trending',
-    top_rated_movie: 'tmdb.movie.top_rated',
-    top_rated_series: 'tmdb.series.top_rated',
-    kids_movie: 'tmdb.movie.kids',
-    kids_series: 'tmdb.series.kids',
-    anime_movie: 'tmdb.movie.anime',
-    anime_series: 'tmdb.series.anime',
-    year_movie: 'tmdb.movie.year',
-    year_series: 'tmdb.series.year',
-    search_movie: 'tmdb.movie.search',
-    search_series: 'tmdb.series.search',
-    anime_search_movie: 'tmdb.movie.anime_search',
-    anime_search_series: 'tmdb.series.anime_search'
-};
-
-const ALLOWED_CATALOG_CONFIG_KEYS = new Set([
-    ...Object.keys(STANDARD_CATALOG_MAP),
-    ...Object.values(PROVIDER_SLUGS).flatMap(slug => [`${slug}_original`, `${slug}_catalog`])
-]);
-
-function sanitizeCatalogSelection(rawCatalogs) {
-    if (typeof rawCatalogs !== "string" || rawCatalogs.length > MAX_CONFIG_JSON_LENGTH) {
-        return null;
-    }
-
-    const sanitized = [];
-    const seen = new Set();
-    for (const rawKey of rawCatalogs.split(',')) {
-        const trimmed = rawKey.trim();
-        if (!trimmed) {
-            continue;
-        }
-        const isDiscoverOnly = trimmed.endsWith('_d');
-        const baseKey = isDiscoverOnly ? trimmed.slice(0, -2) : trimmed;
-        if (!ALLOWED_CATALOG_CONFIG_KEYS.has(baseKey)) {
-            continue;
-        }
-        const normalized = isDiscoverOnly ? `${baseKey}_d` : baseKey;
-        if (seen.has(normalized)) {
-            continue;
-        }
-        sanitized.push(normalized);
-        seen.add(normalized);
-        if (sanitized.length >= MAX_CATALOG_SELECTIONS) {
-            break;
-        }
-    }
-
-    return sanitized.length > 0 ? sanitized.join(',') : null;
-}
-
-function sanitizeConfig(rawConfig) {
-    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
-        return {};
-    }
-
-    const safeConfig = {};
-    if (typeof rawConfig.topStreamingKey === "string") {
-        const key = rawConfig.topStreamingKey.trim();
-        if (TOP_STREAMING_KEY_REGEX.test(key)) {
-            safeConfig.topStreamingKey = key;
-        }
-    }
-
-    const safeCatalogs = sanitizeCatalogSelection(rawConfig.catalogs);
-    if (safeCatalogs) {
-        safeConfig.catalogs = safeCatalogs;
-    }
-
-    return safeConfig;
-}
-
 const manifest = {
     id: "org.bestia.tmdb",
     version: "1.0.19",
@@ -825,7 +679,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
     console.log(`[TMDB Addon] Meta Request: type=${type} id=${id}`);
     
     const store = storage.getStore();
-    const configHash = getConfigHash(store ? store.config : null);
+    const configHash = store && store.config ? JSON.stringify(store.config) : "default";
     const cacheKey = `meta_v3:${type}:${id}:${configHash}`;
     
     const cached = await cache.get(cacheKey);
@@ -1172,11 +1026,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         let queryParams = `api_key=${getTmdbApiKey()}&language=it-IT`;
 
         // Handle Search
-        if (extra && typeof extra.search === "string" && extra.search.trim().length > 0) {
-            const query = extra.search.trim();
-            if (query.length > MAX_SEARCH_QUERY_LENGTH) {
-                return { metas: [] };
-            }
+        if (extra.search) {
+            const query = extra.search;
             const searchResults = new Map(); // Use Map to deduplicate by ID
             const today = new Date().toISOString().split('T')[0];
             const isAnimeSearch = id.includes("anime_search");
@@ -1222,7 +1073,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                         // Sort by popularity and add to results
                         const allCredits = [...castCredits, ...crewCredits].sort((a, b) => b.popularity - a.popularity);
                         
-                        allCredits.slice(0, MAX_SEARCH_PERSON_CREDITS).forEach(item => {
+                        allCredits.forEach(item => {
                             const date = item.release_date || item.first_air_date;
                             if (date && date <= today && !searchResults.has(item.id)) {
                                 // Standard Search: EXCLUDE Anime (Animation + JA)
@@ -1234,10 +1085,18 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     }
                 }
 
-                const results = Array.from(searchResults.values()).slice(0, MAX_SEARCH_RESULTS);
-                const seriesAvailabilityRegionForSearch = (tmdbType === "tv" && !id.includes("anime")) ? "IT" : null;
-                const metas = await enrichAndMapItems(results, type, tmdbType, false, true, seriesAvailabilityRegionForSearch);
-                return { metas: metas.slice(0, 20) };
+                const results = Array.from(searchResults.values());
+                const isStandardSeriesSearch = (tmdbType === "tv" && !id.includes("anime"));
+                const seriesAvailabilityRegionForSearch = isStandardSeriesSearch ? "IT" : null;
+
+                let metas = await enrichAndMapItems(results, type, tmdbType, false, true, seriesAvailabilityRegionForSearch);
+
+                // Fallback: if provider-region filtering removes everything, return plain TMDB search results.
+                if (isStandardSeriesSearch && metas.length === 0 && results.length > 0) {
+                    metas = await enrichAndMapItems(results, type, tmdbType, false, true, null);
+                }
+
+                return { metas };
 
             } catch (e) {
                 console.error(`[TMDB Addon] Search Error: ${e.message}`);
@@ -1543,7 +1402,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
              }
         }
 
-        return { metas: metas.slice(0, 20) };
+        return { metas: metas };
 
     } catch (error) {
         console.error("[TMDB Addon] Error:", error);
@@ -1558,11 +1417,6 @@ addonInterface.manifest.catalogs = fullCatalogs;
 const addonRouter = getRouter(addonInterface);
 
 const app = express();
-const apiRateLimiter = createRateLimiter(
-    RATE_LIMIT_WINDOW_MS,
-    RATE_LIMIT_MAX_REQUESTS,
-    RATE_LIMIT_TRACKED_IPS
-);
 
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1570,7 +1424,6 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Methods', '*');
     next();
 });
-app.use(apiRateLimiter);
 
 app.get('/configure', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'configure.html'));
@@ -1590,15 +1443,10 @@ app.use((req, res, next) => {
         const first = segments[0];
         if (first !== 'manifest.json' && first !== 'configure' && first !== 'catalog' && first !== 'meta' && first !== 'stream' && first !== 'subtitles') {
             try {
-                if (first.length <= MAX_CONFIG_SEGMENT_LENGTH) {
-                    const configStr = Buffer.from(first, 'base64').toString('utf-8');
-                    if (configStr.length <= MAX_CONFIG_JSON_LENGTH) {
-                        config = sanitizeConfig(JSON.parse(configStr));
-                    }
-                }
-                if (req.url.startsWith(`/${first}`)) {
-                    req.url = req.url.slice(first.length + 1) || '/';
-                }
+                const configStr = Buffer.from(first, 'base64').toString('utf-8');
+                config = JSON.parse(configStr);
+                req.url = req.url.replace(`/${first}`, '');
+                if (req.url === '') req.url = '/';
             } catch (e) {
                 // Not a valid config
             }
@@ -1633,8 +1481,30 @@ app.get('/manifest.json', (req, res) => {
             }
 
             // Check for Standard Catalogs first
-            if (STANDARD_CATALOG_MAP[lookupKey]) {
-                const cat = fullCatalogs.find(c => c.id === STANDARD_CATALOG_MAP[lookupKey]);
+            const standardMap = {
+                'upcoming_movie': 'tmdb.movie.upcoming',
+                'upcoming_series': 'tmdb.series.upcoming',
+                'now_playing_movie': 'tmdb.movie.now_playing',
+                'popular_movie': 'tmdb.movie.popular',
+                'popular_series': 'tmdb.series.popular',
+                'trending_movie': 'tmdb.movie.trending',
+                'trending_series': 'tmdb.series.trending',
+                'top_rated_movie': 'tmdb.movie.top_rated',
+                'top_rated_series': 'tmdb.series.top_rated',
+                'kids_movie': 'tmdb.movie.kids',
+                'kids_series': 'tmdb.series.kids',
+                'anime_movie': 'tmdb.movie.anime',
+                'anime_series': 'tmdb.series.anime',
+                'year_movie': 'tmdb.movie.year',
+                'year_series': 'tmdb.series.year',
+                'search_movie': 'tmdb.movie.search',
+                'search_series': 'tmdb.series.search',
+                'anime_search_movie': 'tmdb.movie.anime_search',
+                'anime_search_series': 'tmdb.series.anime_search'
+            };
+            
+            if (standardMap[lookupKey]) {
+                const cat = fullCatalogs.find(c => c.id === standardMap[lookupKey]);
                 if (cat) {
                     if (isDiscoverOnly) {
                         // Clone catalog to avoid mutating global state and add required filter
