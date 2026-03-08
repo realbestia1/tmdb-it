@@ -12,11 +12,15 @@ const CACHE_TTL_SECONDS = {
     metaSeries: 3 * 3600,  // 3 hours
     detailsMovie: 24 * 3600, // 24 hours
     detailsSeries: 6 * 3600, // 6 hours
-    providers: 12 * 3600 // 12 hours
+    providers: 12 * 3600, // 12 hours
+    top10: 6 * 3600 // 6 hours
 };
 const NEGATIVE_CACHE_TTL_SECONDS = 5 * 60; // 5 minutes
 const CACHE_TTL_JITTER_PERCENT = 0.15; // +/-15%
 const NEGATIVE_CACHE_MARKER = "__negative_cache__";
+const TOP10_GLOBAL_CATALOG_ID = "top10_italia";
+const TOP10_MOVIE_CONFIG_ID = "top10_italia_movie";
+const TOP10_SERIES_CONFIG_ID = "top10_italia_series";
 
 function withTtlJitter(baseTtlSeconds, jitterPercent = CACHE_TTL_JITTER_PERCENT) {
     const delta = Math.floor(baseTtlSeconds * jitterPercent);
@@ -44,8 +48,187 @@ async function getImdbRating(imdbId, type) {
     }
 }
 
+const EASY_RATINGS_BASE_URL = (process.env.EASY_RATINGS_BASE_URL || "https://erdb.stremio.dpdns.org").replace(/\/+$/, "");
+
+function normalizeImdbId(imdbId) {
+    if (!imdbId) return null;
+    const imdbStr = String(imdbId).trim();
+    if (!imdbStr) return null;
+    return imdbStr.toLowerCase().startsWith("tt") ? imdbStr : `tt${imdbStr}`;
+}
+
+function getPrimaryMediaId(imdbId, tmdbId) {
+    const normalizedImdbId = normalizeImdbId(imdbId);
+    return normalizedImdbId || `tmdb:${tmdbId}`;
+}
+
+function getRequestConfig(config = null) {
+    if (config && typeof config === "object") return config;
+    const store = storage.getStore();
+    return store && store.config && typeof store.config === "object" ? store.config : {};
+}
+
+function shouldReturnStreams(config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    if (typeof resolvedConfig.returnStreams === "boolean") {
+        return resolvedConfig.returnStreams;
+    }
+
+    if (typeof resolvedConfig.returnStreams === "string") {
+        const normalizedValue = resolvedConfig.returnStreams.trim().toLowerCase();
+        if (["false", "0", "off", "no"].includes(normalizedValue)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function encodeConfigSegment(config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    if (!resolvedConfig || Object.keys(resolvedConfig).length === 0) return null;
+
+    return Buffer
+        .from(JSON.stringify(resolvedConfig), "utf-8")
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/g, "");
+}
+
+function decodeConfigSegment(encodedConfig) {
+    if (!encodedConfig) return {};
+
+    const normalizedConfig = encodedConfig.replace(/-/g, "+").replace(/_/g, "/");
+    const paddingLength = normalizedConfig.length % 4;
+    const paddedConfig = paddingLength === 0
+        ? normalizedConfig
+        : normalizedConfig + "=".repeat(4 - paddingLength);
+
+    return JSON.parse(Buffer.from(paddedConfig, "base64").toString("utf-8"));
+}
+
+function getManifestUrl(config = null) {
+    const encodedConfig = encodeConfigSegment(config);
+    return encodedConfig
+        ? `${ADDON_URL}/${encodedConfig}/manifest.json`
+        : `${ADDON_URL}/manifest.json`;
+}
+
+function normalizeConfiguredCatalogNameKey(key) {
+    const rawKey = String(key || "").trim();
+    if (!rawKey) return "";
+
+    const legacyMap = {
+        [TOP10_MOVIE_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+        [TOP10_SERIES_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+        [LEGACY_TOP10_MOVIE_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+        [LEGACY_TOP10_SERIES_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+        anime_movie: "anime_tmdb_movie",
+        anime_series: "anime_tmdb_series",
+        anime_search_movie: "anime_tmdb_search_movie",
+        anime_search_series: "anime_tmdb_search_series",
+        anime_popular_movie: "anime_kitsu_popular_movie",
+        anime_popular_series: "anime_kitsu_popular_series",
+        anime_ova: "anime_kitsu_ova",
+        anime_ona: "anime_kitsu_ona",
+        anime_special: "anime_kitsu_special"
+    };
+
+    const normalizedKey = legacyMap[rawKey] || rawKey;
+    if (normalizedKey.endsWith("_original")) return normalizedKey.slice(0, -9);
+    if (normalizedKey.endsWith("_catalog")) return normalizedKey.slice(0, -8);
+    if (normalizedKey.endsWith("_top10")) return normalizedKey.slice(0, -6);
+    return normalizedKey;
+}
+
+function getConfiguredCatalogNames(config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    const rawNames = resolvedConfig && resolvedConfig.catalogNames;
+    if (!rawNames || typeof rawNames !== "object" || Array.isArray(rawNames)) return {};
+
+    return Object.entries(rawNames).reduce((accumulator, [key, value]) => {
+        const normalizedKey = normalizeConfiguredCatalogNameKey(key);
+        const cleanValue = typeof value === "string" ? value.trim() : "";
+        if (normalizedKey && cleanValue) {
+            accumulator[normalizedKey] = cleanValue;
+        }
+        return accumulator;
+    }, {});
+}
+
+function resolveConfiguredCatalogName(lookupKey, catalog, customNames = {}) {
+    const rawLookupKey = String(lookupKey || "").trim();
+    if (!rawLookupKey || !catalog || !customNames || typeof customNames !== "object") return "";
+
+    const normalizedLookupKey = normalizeConfiguredCatalogNameKey(rawLookupKey);
+    const baseCustomName = normalizedLookupKey ? customNames[normalizedLookupKey] : "";
+    if (!baseCustomName) return "";
+
+    if (rawLookupKey.endsWith("_original")) return `${baseCustomName} Original`;
+    if (rawLookupKey.endsWith("_top10")) return `${baseCustomName} Top 10 Italia`;
+    return baseCustomName;
+}
+
+function applyConfiguredCatalogName(catalog, lookupKey, customNames = {}) {
+    const customName = resolveConfiguredCatalogName(lookupKey, catalog, customNames);
+    if (!customName || customName === catalog.name) return catalog;
+    return { ...catalog, name: customName };
+}
+
+function isSearchCatalog(catalog) {
+    return !!(
+        catalog &&
+        Array.isArray(catalog.extra) &&
+        catalog.extra.some(extra => extra && extra.name === "search")
+    );
+}
+
+function isTop10Catalog(catalog) {
+    return !!(
+        catalog &&
+        typeof catalog.id === "string" &&
+        (
+            catalog.id.startsWith(TOP10_MANIFEST_PREFIX) ||
+            catalog.id.startsWith(LEGACY_TOP10_MANIFEST_PREFIX)
+        )
+    );
+}
+
+function usesKitsuAnimeIds(catalogId) {
+    return false;
+}
+
+function getConfiguredAssetUrl(config, assetType, imdbId, tmdbId, mediaIdOverride = null) {
+    if (!config || typeof config !== "object") return null;
+
+    const easyRatingsToken = typeof config.easyRatingsToken === "string"
+        ? config.easyRatingsToken.trim()
+        : "";
+    if (easyRatingsToken) {
+        const mediaId = mediaIdOverride || getPrimaryMediaId(imdbId, tmdbId);
+        return `${EASY_RATINGS_BASE_URL}/${easyRatingsToken}/${assetType}/${mediaId}.jpg`;
+    }
+
+    if (assetType !== "poster") return null;
+
+    const topStreamingKey = typeof config.topStreamingKey === "string"
+        ? config.topStreamingKey.trim()
+        : "";
+    if (topStreamingKey) {
+        if (imdbId) {
+            const imdbForTopStreaming = normalizeImdbId(imdbId);
+            return `https://api.top-streaming.stream/${topStreamingKey}/imdb/poster-default/${imdbForTopStreaming}.jpg`;
+        }
+        if (!tmdbId) return null;
+        return `https://api.top-streaming.stream/${topStreamingKey}/tmdb/poster-default/${tmdbId}.jpg`;
+    }
+
+    return null;
+}
+
 // Helper function to enrich and map TMDB items to Stremio Meta objects
-async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = false, skipRegionCheck = false, seriesAvailabilityRegion = null) {
+async function enrichAndMapItems(results, stremioType, tmdbType, config = null, allowFuture = false, skipRegionCheck = false, seriesAvailabilityRegion = null, preferKitsuId = false) {
     const metaObjects = await Promise.all(results.map(async (item) => {
         let imdbId = null;
         let runtime = null;
@@ -58,49 +241,29 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
         let trailerStreams = [];
         let releaseInfo = (item.release_date || item.first_air_date || "").substring(0, 4);
         let exactReleaseDate = item.release_date || item.first_air_date;
-        let tagline = null;
+        let details = null;
+        let kitsuId = null;
+        const resolvedConfig = getRequestConfig(config);
+        const manifestUrl = getManifestUrl(resolvedConfig);
 
-        // Basic genre mapping from IDs
         if (item.genre_ids) {
             genres = item.genre_ids.map(id => GENRE_ID_TO_NAME[id]).filter(Boolean);
         }
 
-        // Fetch extended details (IMDb ID, Runtime, Cast, Director, Logo)
         try {
             const typePath = tmdbType === "movie" ? "movie" : "tv";
-            const cacheKey = `tmdb:details:${typePath}:${item.id}`;
-            let details = await cache.get(cacheKey);
-            if (isNegativeCache(details)) {
-                details = null;
-            }
+            details = await fetchTmdbDetails(typePath, item.id, resolvedConfig);
 
-            if (!details) {
-                // Fetch external_ids, credits, and images in one go
-                const detailsUrl = `${BASE_URL}/${typePath}/${item.id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=external_ids,credits,images,videos,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
-                
-                const detailsRes = await fetch(detailsUrl);
-                details = await detailsRes.json();
-                
-                if (details && !details.status_message) {
-                    const detailsTtl = tmdbType === "movie" ? CACHE_TTL_SECONDS.detailsMovie : CACHE_TTL_SECONDS.detailsSeries;
-                    await cache.set(cacheKey, details, withTtlJitter(detailsTtl));
-                } else {
-                    await cache.set(cacheKey, createNegativeCache("details_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
-                    details = null;
-                }
-            }
-            
             if (details) {
-                // Improved Series Release Info
                 if (tmdbType === "movie" && details.release_dates && details.release_dates.results) {
                     const itRelease = details.release_dates.results.find(r => r.iso_3166_1 === "IT");
                     if (itRelease && itRelease.release_dates && itRelease.release_dates.length > 0) {
-                         const theatrical = itRelease.release_dates.find(d => d.type === 3);
-                         if (theatrical) {
-                             exactReleaseDate = theatrical.release_date.split('T')[0];
-                         } else {
-                             exactReleaseDate = itRelease.release_dates[0].release_date.split('T')[0];
-                         }
+                        const theatrical = itRelease.release_dates.find(d => d.type === 3);
+                        if (theatrical) {
+                            exactReleaseDate = theatrical.release_date.split("T")[0];
+                        } else {
+                            exactReleaseDate = itRelease.release_dates[0].release_date.split("T")[0];
+                        }
                     }
                 } else if (stremioType === "series") {
                     if (details.next_episode_to_air) {
@@ -110,7 +273,6 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                     }
                 }
 
-                // Update releaseInfo to full date for movies (to show "2026-02-27" instead of "2026")
                 if (tmdbType === "movie" && exactReleaseDate) {
                     releaseInfo = exactReleaseDate;
                 }
@@ -125,32 +287,25 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                         }
                     }
                 }
-            
-                // STRICT RELEASE DATE FILTER (Only for Movies)
+
                 if (tmdbType === "movie" && !allowFuture && !skipRegionCheck) {
                     let hasValidRelease = false;
                     if (details.release_dates && details.release_dates.results) {
                         const itRelease = details.release_dates.results.find(r => r.iso_3166_1 === "IT");
                         if (itRelease && itRelease.release_dates) {
-                            // Check if any release date in Italy is <= today
-                            const today = new Date().toISOString().split('T')[0];
-                            const valid = itRelease.release_dates.some(d => {
-                                // Type 3 is Theatrical, 4 is Digital. 
-                                // But we accept any release type as long as it happened in Italy.
-                                // However, to be strict, we check the date.
-                                return d.release_date && d.release_date.split('T')[0] <= today;
-                            });
+                            const today = new Date().toISOString().split("T")[0];
+                            const valid = itRelease.release_dates.some(d =>
+                                d.release_date && d.release_date.split("T")[0] <= today
+                            );
                             if (valid) hasValidRelease = true;
                         }
                     }
-                
+
                     if (!hasValidRelease) {
-                        // If no valid IT release found, return null to filter this item out
                         return null;
                     }
                 }
 
-                // STRICT REGION AVAILABILITY FILTER (Only for TV series when requested)
                 if (tmdbType === "tv" && seriesAvailabilityRegion) {
                     const providersCacheKey = `tmdb:watchproviders:tv:${item.id}`;
                     let providersData = await cache.get(providersCacheKey);
@@ -158,7 +313,7 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                         providersData = null;
                     }
                     if (!providersData) {
-                        const providersUrl = `${BASE_URL}/tv/${item.id}/watch/providers?api_key=${getTmdbApiKey()}`;
+                        const providersUrl = `${BASE_URL}/tv/${item.id}/watch/providers?api_key=${getTmdbApiKey(resolvedConfig)}`;
                         const providersRes = await fetch(providersUrl);
                         providersData = await providersRes.json();
                         if (providersData && !providersData.status_message) {
@@ -176,17 +331,16 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                         return null;
                     }
                 }
-            
+
                 if (details.external_ids && details.external_ids.imdb_id) {
                     imdbId = details.external_ids.imdb_id;
-                    // Add IMDb Link for Rating Badge
                     links.push({
                         name: item.vote_average ? item.vote_average.toFixed(1) : "N/A",
                         category: "imdb",
                         url: `https://imdb.com/title/${imdbId}`
                     });
                 }
-            
+
                 if (details.belongs_to_collection) {
                     links.push({
                         name: details.belongs_to_collection.name,
@@ -195,155 +349,145 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                     });
                 }
 
-            if (details.production_companies) {
-                details.production_companies.slice(0, 2).forEach(c => {
-                    links.push({
-                        name: c.name,
-                        category: "Production",
-                        url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                if (details.production_companies) {
+                    details.production_companies.slice(0, 2).forEach(c => {
+                        links.push({
+                            name: c.name,
+                            category: "Production",
+                            url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                        });
                     });
-                });
-            }
+                }
 
-            if (details.networks) {
-                details.networks.slice(0, 2).forEach(n => {
-                    links.push({
-                        name: n.name,
-                        category: "Networks",
-                        url: `stremio:///search?search=${encodeURIComponent(n.name)}`
+                if (details.networks) {
+                    details.networks.slice(0, 2).forEach(n => {
+                        links.push({
+                            name: n.name,
+                            category: "Networks",
+                            url: `stremio:///search?search=${encodeURIComponent(n.name)}`
+                        });
                     });
-                });
-            }
-            
-            if (details.tagline) {
-                tagline = details.tagline;
-            }
-            
-            if (details.genres) {
-                genres = details.genres.map(g => g.name);
-                // Add Genre Links
-                details.genres.forEach(g => {
-                    links.push({
-                        name: g.name,
-                        category: "Genres",
-                        url: `stremio:///discover/${encodeURIComponent(ADDON_URL + "/manifest.json")}/${stremioType}/tmdb.${stremioType === "movie" ? "movie" : "series"}.popular?genre=${encodeURIComponent(g.name)}`
-                    });
-                });
-            }
+                }
 
-            if (tmdbType === "movie") {
-                if (details.runtime) runtime = `${details.runtime} min`;
-            } else {
-                if (details.episode_run_time && details.episode_run_time.length > 0) {
+                if (details.genres) {
+                    genres = details.genres.map(g => g.name);
+                    details.genres.forEach(g => {
+                        links.push({
+                            name: g.name,
+                            category: "Genres",
+                            url: `stremio:///discover/${encodeURIComponent(manifestUrl)}/${stremioType}/tmdb.${stremioType === "movie" ? "movie" : "series"}.popular?genre=${encodeURIComponent(g.name)}`
+                        });
+                    });
+                }
+
+                if (tmdbType === "movie") {
+                    if (details.runtime) runtime = `${details.runtime} min`;
+                } else if (details.episode_run_time && details.episode_run_time.length > 0) {
                     runtime = `${details.episode_run_time[0]} min`;
                 }
-            }
 
-            if (details.credits) {
-                if (details.credits.cast) {
-                    cast = details.credits.cast.slice(0, 3).map(c => c.name); // Top 3 cast
-                    // Add Cast Links
-                    details.credits.cast.slice(0, 3).forEach(c => {
-                        links.push({
-                            name: c.name,
-                            category: "Cast",
-                            url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                if (details.credits) {
+                    if (details.credits.cast) {
+                        cast = details.credits.cast.slice(0, 3).map(c => c.name);
+                        details.credits.cast.slice(0, 3).forEach(c => {
+                            links.push({
+                                name: c.name,
+                                category: "Cast",
+                                url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                            });
                         });
-                    });
-                }
-                if (details.credits.crew) {
-                    director = details.credits.crew.filter(c => c.job === "Director").map(c => c.name);
-                    // Add Director Links
-                    details.credits.crew.filter(c => c.job === "Director").forEach(c => {
-                        links.push({
-                            name: c.name,
-                            category: "Directors",
-                            url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                    }
+                    if (details.credits.crew) {
+                        director = details.credits.crew.filter(c => c.job === "Director").map(c => c.name);
+                        details.credits.crew.filter(c => c.job === "Director").forEach(c => {
+                            links.push({
+                                name: c.name,
+                                category: "Directors",
+                                url: `stremio:///search?search=${encodeURIComponent(c.name)}`
+                            });
                         });
-                    });
+                    }
                 }
-            }
-            
-            // Check if we need to fetch logo
-            if (details.images && details.images.logos && details.images.logos.length > 0) {
-                    const logoItem = details.images.logos.find(l => l.iso_639_1 === "it") || 
-                                    details.images.logos.find(l => l.iso_639_1 === "en") || 
-                                    details.images.logos[0];
+
+                if (details.images && details.images.logos && details.images.logos.length > 0) {
+                    const logoItem = details.images.logos.find(l => l.iso_639_1 === "it") ||
+                        details.images.logos.find(l => l.iso_639_1 === "en") ||
+                        details.images.logos[0];
                     if (logoItem) {
                         logo = `https://image.tmdb.org/t/p/w500${logoItem.file_path}`;
                     }
-            }
+                }
 
-                // Extract Trailers from TMDB (only if available, no YT fallback to avoid slow catalog)
                 if (details.videos && details.videos.results && details.videos.results.length > 0) {
-                // Filter for Trailers on YouTube
-                const tmdbTrailers = details.videos.results.filter(v => v.site === "YouTube" && v.type === "Trailer");
-                
-                // Sort to prioritize Italian trailers, then English, then higher quality (size)
-                tmdbTrailers.sort((a, b) => {
-                    const langA = a.iso_639_1 === "it" ? 2 : (a.iso_639_1 === "en" ? 1 : 0);
-                    const langB = b.iso_639_1 === "it" ? 2 : (b.iso_639_1 === "en" ? 1 : 0);
-                    
-                    if (langA !== langB) {
-                        return langB - langA;
-                    }
-                    
-                    // If language is same, prioritize higher resolution (size)
-                    // e.g. 2160 > 1080 > 720
-                    return (b.size || 0) - (a.size || 0);
-                });
+                    const tmdbTrailers = details.videos.results.filter(v => v.site === "YouTube" && v.type === "Trailer");
+                    tmdbTrailers.sort((a, b) => {
+                        const langA = a.iso_639_1 === "it" ? 2 : (a.iso_639_1 === "en" ? 1 : 0);
+                        const langB = b.iso_639_1 === "it" ? 2 : (b.iso_639_1 === "en" ? 1 : 0);
 
-                if (tmdbTrailers.length > 0) {
-                    // Stremio expects trailers in specific format
-                    tmdbTrailers.forEach(t => {
-                        trailers.push({
-                            source: t.key,
-                            type: "Trailer"
-                        });
-                        trailerStreams.push({
-                            title: t.name,
-                            ytId: t.key
-                        });
+                        if (langA !== langB) {
+                            return langB - langA;
+                        }
+
+                        return (b.size || 0) - (a.size || 0);
                     });
-                }
+
+                    if (tmdbTrailers.length > 0) {
+                        tmdbTrailers.forEach(trailer => {
+                            trailers.push({
+                                source: trailer.key,
+                                type: "Trailer"
+                            });
+                            trailerStreams.push({
+                                title: trailer.name,
+                                ytId: trailer.key
+                            });
+                        });
+                    }
                 }
             }
-
-        } catch (e) {
-            console.warn(`[TMDB Addon] Failed to fetch details for ${item.id}`, e);
+        } catch (error) {
+            console.warn(`[Easy Catalogs] Failed to fetch details for ${item.id}`, error);
         }
 
-        const store = storage.getStore();
-        const formattedDate = exactReleaseDate ? exactReleaseDate.split('-').reverse().join('/') : null;
+        if (preferKitsuId) {
+            try {
+                kitsuId = await resolveKitsuIdForAnimeMedia(item, details, stremioType);
+            } catch (error) {
+                kitsuId = null;
+            }
 
-        // Override releaseInfo for movies with DD/MM/YYYY
+            if (!kitsuId) return null;
+        }
+
+        const formattedDate = exactReleaseDate ? exactReleaseDate.split("-").reverse().join("/") : null;
         if (tmdbType === "movie" && formattedDate) {
             releaseInfo = formattedDate;
         }
 
-        const config = store ? store.config : {};
         let posterUrl = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null;
-        
-        if (config.topStreamingKey) {
-            if (imdbId) {
-                const imdbStr = String(imdbId);
-                const imdbForTopStreaming = imdbStr.toLowerCase().startsWith("tt") ? imdbStr : `tt${imdbStr}`;
-                posterUrl = `https://api.top-streaming.stream/${config.topStreamingKey}/imdb/poster-default/${imdbForTopStreaming}.jpg`;
-            } else {
-                posterUrl = `https://api.top-streaming.stream/${config.topStreamingKey}/tmdb/poster-default/${item.id}.jpg`;
-            }
-        }
+        const configuredPosterUrl = getConfiguredAssetUrl(resolvedConfig, "poster", imdbId, item.id);
+        if (configuredPosterUrl) posterUrl = configuredPosterUrl;
+
+        let backgroundUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null;
+        const configuredBackdropUrl = getConfiguredAssetUrl(resolvedConfig, "backdrop", imdbId, item.id);
+        if (configuredBackdropUrl) backgroundUrl = configuredBackdropUrl;
+
+        let logoUrl = logo;
+        const configuredLogoUrl = getConfiguredAssetUrl(resolvedConfig, "logo", imdbId, item.id);
+        if (configuredLogoUrl) logoUrl = configuredLogoUrl;
+
+        const metaId = kitsuId ? `kitsu:${kitsuId}` : (imdbId || `tmdb:${item.id}`);
 
         return {
-            id: imdbId ? imdbId : `tmdb:${item.id}`,
-            type: stremioType, // Stremio type (movie/series)
+            id: metaId,
+            type: stremioType,
             name: item.title || item.name,
             poster: posterUrl,
-            background: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
-            logo: logo,
-            description: item.overview,
+            background: backgroundUrl,
+            logo: logoUrl,
+            description: item.overview || (details && details.overview) || undefined,
             releaseInfo: releaseInfo,
-            released: exactReleaseDate ? new Date(exactReleaseDate).toISOString() : null,
+            released: safeToIsoString(exactReleaseDate),
             imdbRating: item.vote_average ? item.vote_average.toFixed(1) : null,
             runtime: runtime,
             genres: genres,
@@ -353,25 +497,2271 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
             trailers: trailers,
             trailerStreams: trailerStreams,
             behaviorHints: {
-                defaultVideoId: stremioType === "movie" ? (imdbId || `tmdb:${item.id}`) : null,
+                defaultVideoId: stremioType === "movie" ? metaId : null,
                 hasScheduledVideos: stremioType === "series"
             }
         };
     }));
-    
-    return metaObjects.filter(m => m !== null);
+
+    return metaObjects.filter(Boolean);
 }
 
 const DEFAULT_TMDB_API_KEY = process.env.TMDB_API_KEY || "68e094699525b18a70bab2f86b1fa706";
 const BASE_URL = "https://api.themoviedb.org/3";
+function decodeBase64Literal(value) {
+    return Buffer.from(String(value || ""), "base64").toString("utf8");
+}
 
-function getTmdbApiKey() {
-    const store = storage.getStore();
-    const customKey = store && store.config && typeof store.config.tmdbApiKey === "string"
-        ? store.config.tmdbApiKey.trim()
+const LEGACY_TOP10_MOVIE_CONFIG_ID = decodeBase64Literal("anVzdHdhdGNoX3RvcDEwX21vdmll");
+const LEGACY_TOP10_SERIES_CONFIG_ID = decodeBase64Literal("anVzdHdhdGNoX3RvcDEwX3Nlcmllcw==");
+const TOP10_MANIFEST_PREFIX = "t10.";
+const TOP10_MOVIE_MANIFEST_ID = `${TOP10_MANIFEST_PREFIX}movie.top10`;
+const TOP10_SERIES_MANIFEST_ID = `${TOP10_MANIFEST_PREFIX}series.top10`;
+const LEGACY_TOP10_MANIFEST_PREFIX = decodeBase64Literal("ancu");
+const LEGACY_TOP10_MOVIE_MANIFEST_ID = decodeBase64Literal("ancubW92aWUudG9wMTA=");
+const LEGACY_TOP10_SERIES_MANIFEST_ID = decodeBase64Literal("ancuc2VyaWVzLnRvcDEw");
+
+const TOP10_SOURCE_BASE_URL = decodeBase64Literal("aHR0cHM6Ly93d3cuanVzdHdhdGNoLmNvbQ==");
+const TOP10_SOURCE_GRAPHQL_URL = decodeBase64Literal("aHR0cHM6Ly9hcGlzLmp1c3R3YXRjaC5jb20vZ3JhcGhxbA==");
+const TOP10_SOURCE_IMAGE_BASE_URL = decodeBase64Literal("aHR0cHM6Ly9pbWFnZXMuanVzdHdhdGNoLmNvbQ==");
+const TOP10_SOURCE_COUNTRY = "IT";
+const TOP10_PROVIDER_PAGE_SLUGS = {
+    netflix: "netflix",
+    amazon: "amazon-prime-video",
+    disney: "disney-plus",
+    apple: "apple-tv-plus",
+    hbo: "hbo-max",
+    paramount: "paramount-plus",
+    now: "now-tv",
+    sky: null,
+    mediaset: "mediaset-infinity",
+    timvision: "timvision"
+};
+
+function buildTop10ManifestId(type, slug = null) {
+    return slug
+        ? `${TOP10_MANIFEST_PREFIX}${type}.${slug}_top10`
+        : `${TOP10_MANIFEST_PREFIX}${type}.top10`;
+}
+
+function normalizeTop10ManifestId(catalogId) {
+    const normalizedCatalogId = String(catalogId || "").trim();
+    if (!normalizedCatalogId) return normalizedCatalogId;
+    if (normalizedCatalogId === LEGACY_TOP10_MOVIE_MANIFEST_ID) return TOP10_MOVIE_MANIFEST_ID;
+    if (normalizedCatalogId === LEGACY_TOP10_SERIES_MANIFEST_ID) return TOP10_SERIES_MANIFEST_ID;
+    if (normalizedCatalogId.startsWith(LEGACY_TOP10_MANIFEST_PREFIX)) {
+        return `${TOP10_MANIFEST_PREFIX}${normalizedCatalogId.slice(LEGACY_TOP10_MANIFEST_PREFIX.length)}`;
+    }
+    return normalizedCatalogId;
+}
+const KITSU_BASE_URL = "https://kitsu.io/api/edge";
+const ANIME_MAPPING_BASE_URL = "https://animemapping.stremio.dpdns.org";
+const EASY_STREAMS_BASE_URL = "https://easystreams.stremio.dpdns.org";
+const KITSU_TTL_SECONDS = {
+    anime: 24 * 3600,
+    episodes: 12 * 3600,
+    externalLookup: 24 * 3600,
+    search: 6 * 3600,
+    catalog: 6 * 3600,
+    animeMapping: 30 * 24 * 3600
+};
+
+function getTmdbApiKey(config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    const customKey = typeof resolvedConfig.tmdbApiKey === "string"
+        ? resolvedConfig.tmdbApiKey.trim()
         : "";
     const isValidFormat = /^[a-f0-9]{32}$/i.test(customKey);
     return (isValidFormat ? customKey : "") || DEFAULT_TMDB_API_KEY;
+}
+
+function normalizeKitsuId(value) {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return null;
+
+    const match = rawValue.match(/^kitsu:(\d+)$/i) || rawValue.match(/^(\d+)$/);
+    return match ? match[1] : null;
+}
+
+function uniqueNonEmptyStrings(values) {
+    return [...new Set(
+        (Array.isArray(values) ? values : [])
+            .map(value => String(value || "").trim())
+            .filter(Boolean)
+    )];
+}
+
+function normalizeMatchTitle(value) {
+    return String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+
+function getYearFromValue(value) {
+    const match = String(value || "").match(/\b(\d{4})\b/);
+    return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function getTmdbGenreIds(payload = {}) {
+    if (Array.isArray(payload.genre_ids)) {
+        return payload.genre_ids
+            .map(value => Number.parseInt(String(value || ""), 10))
+            .filter(value => Number.isFinite(value));
+    }
+
+    if (Array.isArray(payload.genres)) {
+        return payload.genres
+            .map(entry => Number.parseInt(String(entry && entry.id || ""), 10))
+            .filter(value => Number.isFinite(value));
+    }
+
+    return [];
+}
+
+function hasTmdbCountryCode(payload = {}, code) {
+    const normalizedCode = String(code || "").trim().toUpperCase();
+    if (!normalizedCode) return false;
+
+    const originCountries = Array.isArray(payload.origin_country) ? payload.origin_country : [];
+    const productionCountries = Array.isArray(payload.production_countries)
+        ? payload.production_countries.map(entry => entry && entry.iso_3166_1)
+        : [];
+
+    return [...originCountries, ...productionCountries]
+        .some(entry => String(entry || "").trim().toUpperCase() === normalizedCode);
+}
+
+function hasTmdbLanguageCode(payload = {}, code) {
+    const normalizedCode = String(code || "").trim().toLowerCase();
+    if (!normalizedCode) return false;
+
+    if (String(payload.original_language || "").trim().toLowerCase() === normalizedCode) {
+        return true;
+    }
+
+    const spokenLanguages = Array.isArray(payload.spoken_languages) ? payload.spoken_languages : [];
+    return spokenLanguages.some(entry =>
+        String(entry && entry.iso_639_1 || "").trim().toLowerCase() === normalizedCode
+    );
+}
+
+function isTmdbAnimeDetails(payload = {}) {
+    if (!payload || typeof payload !== "object") return false;
+
+    const genreIds = getTmdbGenreIds(payload);
+    const isAnimation = genreIds.includes(16);
+    if (!isAnimation) return false;
+
+    return hasTmdbLanguageCode(payload, "ja") || hasTmdbCountryCode(payload, "JP");
+}
+
+function safeToIsoString(value) {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function isReleasedOnOrBeforeToday(value) {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return false;
+
+    const parsed = new Date(rawValue);
+    if (Number.isNaN(parsed.getTime())) return false;
+
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    return parsed.getTime() <= today.getTime();
+}
+
+function getMetaReleaseTimestamp(meta = {}) {
+    const releasedTimestamp = meta && meta.released
+        ? Date.parse(meta.released)
+        : Number.NaN;
+    if (Number.isFinite(releasedTimestamp)) {
+        return releasedTimestamp;
+    }
+
+    const releaseYear = getYearFromValue(meta && (meta.releaseInfo || meta.year));
+    return Number.isFinite(releaseYear)
+        ? Date.UTC(releaseYear, 0, 1)
+        : 0;
+}
+
+function sortMetasByReleaseDesc(metas = []) {
+    return (Array.isArray(metas) ? [...metas] : []).sort((left, right) =>
+        getMetaReleaseTimestamp(right) - getMetaReleaseTimestamp(left)
+    );
+}
+
+function getLastPathSegment(value) {
+    const parts = String(value || "")
+        .split("/")
+        .map(part => part.trim())
+        .filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
+function getTitleFromSlugPath(fullPath) {
+    const slug = getLastPathSegment(fullPath);
+    return slug ? slug.replace(/-/g, " ").trim() : "";
+}
+
+function extractEmbeddedJsonObject(html, marker) {
+    if (typeof html !== "string" || !marker) return null;
+
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex === -1) return null;
+
+    const startIndex = html.indexOf("{", markerIndex + marker.length);
+    if (startIndex === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = startIndex; index < html.length; index += 1) {
+        const character = html[index];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+
+        if (inString && character === "\\") {
+            escaped = true;
+            continue;
+        }
+
+        if (character === "\"") {
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) continue;
+
+        if (character === "{") {
+            depth += 1;
+            continue;
+        }
+
+        if (character === "}") {
+            depth -= 1;
+            if (depth === 0) {
+                return html.slice(startIndex, index + 1);
+            }
+        }
+    }
+
+    return null;
+}
+
+function extractTop10ApolloState(html) {
+    const jsonString = extractEmbeddedJsonObject(html, "window.__APOLLO_STATE__=");
+    if (!jsonString) return null;
+
+    try {
+        const parsed = JSON.parse(jsonString);
+        if (parsed && typeof parsed === "object" && parsed.defaultClient && typeof parsed.defaultClient === "object") {
+            return parsed.defaultClient;
+        }
+        return parsed;
+    } catch (error) {
+        return null;
+    }
+}
+
+function getStateReferenceId(reference) {
+    return reference && typeof reference === "object" && typeof reference.id === "string"
+        ? reference.id
+        : null;
+}
+
+function resolveTop10StateEntry(state, reference) {
+    const referenceId = getStateReferenceId(reference);
+    if (referenceId && state && typeof state === "object" && state[referenceId]) {
+        return state[referenceId];
+    }
+
+    return reference && typeof reference === "object" ? reference : null;
+}
+
+function buildTop10ImageUrl(pathValue) {
+    const rawPath = String(pathValue || "").trim();
+    if (!rawPath) return null;
+    if (/^https?:\/\//i.test(rawPath)) return rawPath;
+    if (rawPath.startsWith("/poster/") || rawPath.startsWith("/backdrop/") || rawPath.startsWith("/icon/")) {
+        return `${TOP10_SOURCE_IMAGE_BASE_URL}${rawPath}`;
+    }
+    if (rawPath.startsWith("/")) {
+        return `${TOP10_SOURCE_BASE_URL}${rawPath}`;
+    }
+    return rawPath;
+}
+
+function getTop10ContentEntry(state, nodeEntry) {
+    if (!nodeEntry || typeof nodeEntry !== "object") return null;
+
+    const contentKey = Object.keys(nodeEntry).find(key => key.startsWith("content("));
+    return contentKey ? resolveTop10StateEntry(state, nodeEntry[contentKey]) : null;
+}
+
+function getTop10ScoringEntry(state, contentEntry) {
+    if (!contentEntry || typeof contentEntry !== "object") return null;
+
+    const scoringKey = Object.keys(contentEntry).find(key => key.startsWith("scoring"));
+    return scoringKey ? resolveTop10StateEntry(state, contentEntry[scoringKey]) : null;
+}
+
+function getTop10PrimaryBackdropUrl(state, contentEntry) {
+    if (!contentEntry || typeof contentEntry !== "object") return null;
+
+    const backdropsKey = Object.keys(contentEntry).find(key => key.startsWith("backdrops("));
+    const backdrops = backdropsKey && Array.isArray(contentEntry[backdropsKey])
+        ? contentEntry[backdropsKey]
+        : [];
+    if (backdrops.length === 0) return null;
+
+    const backdropEntry = resolveTop10StateEntry(state, backdrops[0]);
+    return backdropEntry && backdropEntry.backdropUrl
+        ? buildTop10ImageUrl(backdropEntry.backdropUrl)
+        : null;
+}
+
+function extractTop10ChartEntries(state, options = {}) {
+    if (!state || typeof state !== "object") return [];
+
+    const objectType = String(options.objectType || "").trim().toUpperCase();
+    const requiresPackages = options.requiresPackages === true;
+    if (!objectType) return [];
+
+    const queryKey = Object.keys(state).find(key =>
+        key.startsWith("$ROOT_QUERY.streamingCharts(") &&
+        state[key] &&
+        Array.isArray(state[key].edges) &&
+        key.includes(`"country":"${TOP10_SOURCE_COUNTRY}"`) &&
+        key.includes(`"objectType":"${objectType}"`) &&
+        key.includes("\"first\":10") &&
+        key.includes("\"category\":\"WEEKLY_POPULARITY_SAME_CONTENT_TYPE\"") &&
+        (requiresPackages ? key.includes("\"packages\":[") : !key.includes("\"packages\":["))
+    );
+    if (!queryKey) return [];
+
+    const queryEntry = state[queryKey];
+    const edgeReferences = Array.isArray(queryEntry && queryEntry.edges) ? queryEntry.edges : [];
+
+    return edgeReferences
+        .map((edgeReference, index) => {
+            const edgeEntry = resolveTop10StateEntry(state, edgeReference);
+            const nodeEntry = resolveTop10StateEntry(state, edgeEntry && edgeEntry.node);
+            const contentEntry = getTop10ContentEntry(state, nodeEntry);
+            if (!nodeEntry || !contentEntry || !contentEntry.title) return null;
+
+            const scoringEntry = getTop10ScoringEntry(state, contentEntry);
+            const chartInfoEntry = resolveTop10StateEntry(state, edgeEntry && edgeEntry.streamingChartInfo);
+
+            return {
+                jwId: typeof nodeEntry.id === "string" ? nodeEntry.id : null,
+                title: String(contentEntry.title).trim(),
+                fullPath: typeof contentEntry.fullPath === "string" ? contentEntry.fullPath : null,
+                year: getYearFromValue(contentEntry.originalReleaseYear),
+                poster: buildTop10ImageUrl(
+                    contentEntry['posterUrl({"format":"JPG","profile":"S166"})'] ||
+                    contentEntry['posterUrl({})'] ||
+                    contentEntry.posterUrl
+                ),
+                background: getTop10PrimaryBackdropUrl(state, contentEntry),
+                imdbRating: scoringEntry && Number.isFinite(Number(scoringEntry.imdbScore))
+                    ? Number(scoringEntry.imdbScore)
+                    : null,
+                rank: Number.parseInt(String(chartInfoEntry && chartInfoEntry.rank || ""), 10) || (index + 1),
+                trend: chartInfoEntry && chartInfoEntry.trend ? String(chartInfoEntry.trend) : null,
+                trendDifference: Number.parseInt(String(chartInfoEntry && chartInfoEntry.trendDifference || ""), 10) || 0,
+                topRank: Number.parseInt(String(chartInfoEntry && chartInfoEntry.topRank || ""), 10) || null
+            };
+        })
+        .filter(Boolean);
+}
+
+async function fetchTop10ChartEntriesFromGraphql(options = {}) {
+    const objectType = String(options.objectType || "").trim().toUpperCase();
+    if (!objectType) return [];
+
+    const cacheKey = `top10:graphql:v1:${objectType}:${TOP10_SOURCE_COUNTRY}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return [];
+    if (cached) return cached;
+
+    const query = `
+        query GetStreamingCharts($country: Country!, $language: Language!, $filter: StreamingChartsFilter!, $first: Int!, $after: String!) {
+            streamingCharts(country: $country, filter: $filter, first: $first, after: $after) {
+                edges {
+                    streamingChartInfo {
+                        rank
+                        trend
+                        trendDifference
+                        topRank
+                    }
+                    node {
+                        id
+                        content(country: $country, language: $language) {
+                            title
+                            fullPath
+                            originalReleaseYear
+                            posterUrl(format: JPG, profile: S166)
+                        }
+                    }
+                }
+            }
+        }
+    `;
+
+    try {
+        const response = await fetch(TOP10_SOURCE_GRAPHQL_URL, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+            },
+            body: JSON.stringify({
+                query,
+                variables: {
+                    country: TOP10_SOURCE_COUNTRY,
+                    language: "it",
+                    first: 10,
+                    after: "",
+                    filter: {
+                        category: "WEEKLY_POPULARITY_SAME_CONTENT_TYPE",
+                        objectType
+                    }
+                }
+            })
+        });
+        const payload = await response.json();
+        const edges = Array.isArray(payload && payload.data && payload.data.streamingCharts && payload.data.streamingCharts.edges)
+            ? payload.data.streamingCharts.edges
+            : [];
+
+        const entries = edges
+            .map((edge, index) => {
+                const node = edge && edge.node && typeof edge.node === "object" ? edge.node : null;
+                const content = node && node.content && typeof node.content === "object" ? node.content : null;
+                const chartInfo = edge && edge.streamingChartInfo && typeof edge.streamingChartInfo === "object"
+                    ? edge.streamingChartInfo
+                    : null;
+                if (!node || !content || !content.title) return null;
+
+                return {
+                    jwId: typeof node.id === "string" ? node.id : null,
+                    title: String(content.title).trim(),
+                    fullPath: typeof content.fullPath === "string" ? content.fullPath : null,
+                    year: getYearFromValue(content.originalReleaseYear),
+                    poster: buildTop10ImageUrl(content.posterUrl),
+                    background: null,
+                    imdbRating: null,
+                    rank: Number.parseInt(String(chartInfo && chartInfo.rank || ""), 10) || (index + 1),
+                    trend: chartInfo && chartInfo.trend ? String(chartInfo.trend) : null,
+                    trendDifference: Number.parseInt(String(chartInfo && chartInfo.trendDifference || ""), 10) || 0,
+                    topRank: Number.parseInt(String(chartInfo && chartInfo.topRank || ""), 10) || null
+                };
+            })
+            .filter(Boolean);
+
+        if (response.ok && entries.length > 0) {
+            await cache.set(cacheKey, entries, withTtlJitter(CACHE_TTL_SECONDS.top10));
+            return entries;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("top10_graphql_chart_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return [];
+}
+
+async function fetchTop10ChartEntriesFromPage(pageUrl, options = {}) {
+    const objectType = String(options.objectType || "").trim().toUpperCase();
+    const requiresPackages = options.requiresPackages === true;
+    if (!pageUrl || !objectType) return [];
+
+    const cacheKey = `top10:charts:v1:${requiresPackages ? "provider" : "global"}:${objectType}:${pageUrl}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return [];
+    if (cached) return cached;
+
+    try {
+        const response = await fetch(pageUrl, {
+            headers: {
+                Accept: "text/html,application/xhtml+xml",
+                "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+            }
+        });
+        const html = await response.text();
+        const state = extractTop10ApolloState(html);
+        const entries = extractTop10ChartEntries(state, { objectType, requiresPackages });
+
+        if (response.ok && entries.length > 0) {
+            await cache.set(cacheKey, entries, withTtlJitter(CACHE_TTL_SECONDS.top10));
+            return entries;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("top10_chart_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return [];
+}
+
+function getTmdbSearchCandidatesFromResult(result) {
+    return uniqueNonEmptyStrings([
+        result && result.title,
+        result && result.name,
+        result && result.original_title,
+        result && result.original_name
+    ]);
+}
+
+function scoreTmdbSearchResult(result, query, expectedYear) {
+    if (!result) return 0;
+
+    const normalizedQuery = normalizeMatchTitle(query);
+    if (!normalizedQuery) return 0;
+
+    const titleCandidates = getTmdbSearchCandidatesFromResult(result).map(normalizeMatchTitle);
+    if (titleCandidates.length === 0) return 0;
+
+    let score = 0;
+    if (titleCandidates.includes(normalizedQuery)) {
+        score += 100;
+    } else if (titleCandidates.some(title => title.startsWith(normalizedQuery) || normalizedQuery.startsWith(title))) {
+        score += 75;
+    } else {
+        const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+        const bestOverlap = titleCandidates.reduce((bestScore, candidate) => {
+            const candidateTokens = candidate.split(" ").filter(Boolean);
+            const sharedCount = queryTokens.filter(token => candidateTokens.includes(token)).length;
+            const overlapScore = queryTokens.length > 0 && candidateTokens.length > 0
+                ? (sharedCount / Math.max(queryTokens.length, candidateTokens.length)) * 50
+                : 0;
+            return Math.max(bestScore, overlapScore);
+        }, 0);
+        score += bestOverlap;
+    }
+
+    const resultYear = getYearFromValue(result.release_date || result.first_air_date);
+    if (Number.isFinite(expectedYear) && resultYear) {
+        if (resultYear === expectedYear) {
+            score += 30;
+        } else if (Math.abs(resultYear - expectedYear) === 1) {
+            score += 10;
+        }
+    }
+
+    score += Math.min(Number(result.popularity || 0) / 100, 5);
+    score += Math.min(Number(result.vote_count || 0) / 200, 5);
+    return score;
+}
+
+async function searchTmdbByTitleCandidate(typePath, query, expectedYear = null, config = null) {
+    const normalizedQuery = String(query || "").trim();
+    if (!normalizedQuery) return null;
+
+    const yearQuery = Number.isFinite(expectedYear)
+        ? `&${typePath === "movie" ? "year" : "first_air_date_year"}=${expectedYear}`
+        : "";
+
+    try {
+        const response = await fetch(
+            `${BASE_URL}/search/${typePath}?api_key=${getTmdbApiKey(config)}&query=${encodeURIComponent(normalizedQuery)}&language=it-IT${yearQuery}`
+        );
+        const payload = await response.json();
+        const results = Array.isArray(payload && payload.results) ? payload.results : [];
+        if (results.length === 0) return null;
+
+        let bestMatch = null;
+        let bestScore = 0;
+        for (const result of results.slice(0, 10)) {
+            const currentScore = scoreTmdbSearchResult(result, normalizedQuery, expectedYear);
+            if (currentScore > bestScore) {
+                bestScore = currentScore;
+                bestMatch = result;
+            }
+        }
+
+        return bestScore >= 60 ? bestMatch : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function resolveTmdbIdFromTop10Entry(entry, requestedType, config = null) {
+    const expectedYear = getYearFromValue(entry && entry.year);
+    const slugTitle = getTitleFromSlugPath(entry && entry.fullPath);
+    const titleCandidates = uniqueNonEmptyStrings([
+        entry && entry.title,
+        slugTitle
+    ]);
+    if (titleCandidates.length === 0) return null;
+
+    const cacheKey = `top10:tmdb-lookup:v1:${requestedType}:${normalizeMatchTitle(titleCandidates[0])}:${expectedYear || ""}:${normalizeMatchTitle(slugTitle)}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached && cached.tmdbId) return cached.tmdbId;
+
+    const typePath = requestedType === "series" ? "tv" : "movie";
+
+    for (const candidate of titleCandidates) {
+        let bestMatch = await searchTmdbByTitleCandidate(typePath, candidate, expectedYear, config);
+        if (!bestMatch && Number.isFinite(expectedYear)) {
+            bestMatch = await searchTmdbByTitleCandidate(typePath, candidate, null, config);
+        }
+
+        const tmdbId = bestMatch && bestMatch.id ? String(bestMatch.id) : null;
+        if (tmdbId) {
+            await cache.set(cacheKey, { tmdbId }, withTtlJitter(CACHE_TTL_SECONDS.top10));
+            return tmdbId;
+        }
+    }
+
+    await cache.set(cacheKey, createNegativeCache("top10_tmdb_lookup_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+function buildFallbackTop10CatalogMeta(entry, requestedType, tmdbId, config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    const metaId = `tmdb:${tmdbId}`;
+    const configuredPosterUrl = getConfiguredAssetUrl(resolvedConfig, "poster", null, tmdbId, metaId);
+    const configuredBackdropUrl = getConfiguredAssetUrl(resolvedConfig, "backdrop", null, tmdbId, metaId);
+
+    return {
+        id: metaId,
+        type: requestedType,
+        name: entry.title,
+        poster: configuredPosterUrl || entry.poster || undefined,
+        background: configuredBackdropUrl || entry.background || undefined,
+        description: entry.rank ? `Top 10 Italia #${entry.rank}` : undefined,
+        releaseInfo: entry.year ? String(entry.year) : undefined,
+        year: entry.year || undefined,
+        imdbRating: entry.imdbRating ? String(entry.imdbRating) : null,
+        behaviorHints: {
+            defaultVideoId: requestedType === "movie" ? metaId : null,
+            hasScheduledVideos: requestedType === "series"
+        }
+    };
+}
+
+async function mapTop10EntryToMeta(entry, requestedType, config = null) {
+    const tmdbId = await resolveTmdbIdFromTop10Entry(entry, requestedType, config);
+    if (!tmdbId) return null;
+
+    const details = await fetchTmdbDetails(requestedType === "series" ? "tv" : "movie", tmdbId, config);
+    if (details) {
+        return transformToMeta(details, requestedType, config, { includeVideos: false });
+    }
+
+    return buildFallbackTop10CatalogMeta(entry, requestedType, tmdbId, config);
+}
+
+async function fetchTop10CatalogMetas(catalogId, requestedType, extra = {}, config = null) {
+    const normalizedCatalogId = normalizeTop10ManifestId(catalogId);
+    if (!normalizedCatalogId) return [];
+
+    const skipValue = Number.parseInt(String(extra && extra.skip || "0"), 10);
+    if (Number.isFinite(skipValue) && skipValue > 0) return [];
+
+    const configHash = config && typeof config === "object" && Object.keys(config).length > 0
+        ? JSON.stringify(config)
+        : "default";
+    const cacheKey = `top10:catalog:v2:${normalizedCatalogId}:${requestedType}:${configHash}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return [];
+    if (cached) return cached;
+
+    const objectType = requestedType === "series" ? "SHOW" : "MOVIE";
+    let pageUrl = `${TOP10_SOURCE_BASE_URL}/it/streaming-charts`;
+    let requiresPackages = false;
+
+    const providerMatch = normalizedCatalogId.match(/^t10\.(movie|series)\.([a-z0-9]+)_top10$/i);
+    if (providerMatch) {
+        const providerSlug = providerMatch[2].toLowerCase();
+        const providerPageSlug = TOP10_PROVIDER_PAGE_SLUGS[providerSlug];
+        if (!providerPageSlug) {
+            await cache.set(cacheKey, createNegativeCache("top10_provider_not_supported"), NEGATIVE_CACHE_TTL_SECONDS);
+            return [];
+        }
+
+        pageUrl = `${TOP10_SOURCE_BASE_URL}/it/provider/${providerPageSlug}`;
+        requiresPackages = true;
+    }
+
+    const entries = providerMatch
+        ? await fetchTop10ChartEntriesFromPage(pageUrl, { objectType, requiresPackages })
+        : await fetchTop10ChartEntriesFromGraphql({ objectType });
+    if (entries.length === 0) {
+        await cache.set(cacheKey, createNegativeCache("top10_catalog_empty"), NEGATIVE_CACHE_TTL_SECONDS);
+        return [];
+    }
+
+    const metas = (await mapWithConcurrency(
+        entries,
+        2,
+        entry => mapTop10EntryToMeta(entry, requestedType, config)
+    )).filter(Boolean);
+
+    if (metas.length > 0) {
+        await cache.set(cacheKey, metas, withTtlJitter(CACHE_TTL_SECONDS.top10));
+        return metas;
+    }
+
+    await cache.set(cacheKey, createNegativeCache("top10_catalog_map_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+    return [];
+}
+
+function inferStremioTypeFromKitsuSubtype(subtype, fallback = "series") {
+    return String(subtype || "").trim().toLowerCase() === "movie" ? "movie" : fallback;
+}
+
+function getKitsuTitleCandidates(attributes = {}) {
+    const titlesObject = attributes.titles && typeof attributes.titles === "object"
+        ? attributes.titles
+        : {};
+    const abbreviatedTitles = Array.isArray(attributes.abbreviatedTitles)
+        ? attributes.abbreviatedTitles
+        : [];
+
+    return uniqueNonEmptyStrings([
+        attributes.canonicalTitle,
+        attributes.slug ? String(attributes.slug).replace(/-/g, " ") : null,
+        ...Object.values(titlesObject),
+        ...abbreviatedTitles
+    ]);
+}
+
+function getKitsuPreferredTitle(attributes = {}, config = null, options = {}) {
+    const titlesObject = attributes.titles && typeof attributes.titles === "object"
+        ? attributes.titles
+        : {};
+    const includeSlug = options.includeSlug !== false;
+
+    return uniqueNonEmptyStrings([
+        titlesObject.en,
+        titlesObject.en_us,
+        attributes.canonicalTitle,
+        attributes.title,
+        titlesObject.en_jp,
+        titlesObject.ja_jp,
+        titlesObject.ja,
+        ...(includeSlug && attributes.slug ? [String(attributes.slug).replace(/-/g, " ")] : [])
+    ])[0] || null;
+}
+
+function isDeletedKitsuAttributes(attributes = {}) {
+    if (!attributes || typeof attributes !== "object") return false;
+
+    const slug = String(attributes.slug || "").trim().toLowerCase();
+    const titleCandidates = uniqueNonEmptyStrings([
+        attributes.canonicalTitle,
+        attributes.title,
+        ...(attributes.titles && typeof attributes.titles === "object" ? Object.values(attributes.titles) : [])
+    ])
+        .map(normalizeMatchTitle)
+        .filter(Boolean);
+    const synopsisCandidates = uniqueNonEmptyStrings([
+        attributes.synopsis,
+        attributes.description
+    ])
+        .map(normalizeMatchTitle)
+        .filter(Boolean);
+
+    if (slug.startsWith("deleted-")) {
+        return true;
+    }
+
+    return titleCandidates.length > 0 &&
+        titleCandidates.every(title => title === "deleted") &&
+        synopsisCandidates.length > 0 &&
+        synopsisCandidates.every(text => text === "deleted page");
+}
+
+function isDeletedKitsuPayload(payload) {
+    const attributes = payload && payload.data && payload.data.attributes
+        ? payload.data.attributes
+        : null;
+    return isDeletedKitsuAttributes(attributes);
+}
+
+function getKitsuPoster(attributes = {}) {
+    const poster = attributes.posterImage || {};
+    return poster.large || poster.original || poster.medium || poster.small || null;
+}
+
+function getKitsuBackground(attributes = {}) {
+    const cover = attributes.coverImage || {};
+    return cover.original || cover.large || cover.medium || null;
+}
+
+function getKitsuCategories(payload) {
+    const included = Array.isArray(payload && payload.included) ? payload.included : [];
+
+    return included
+        .filter(entry => {
+            const type = String(entry && entry.type || "").trim().toLowerCase();
+            return type === "categories" && entry.attributes && entry.attributes.title;
+        })
+        .map(entry => entry.attributes.title)
+        .sort();
+}
+
+function getKitsuFranchiseLinks(payload, config = null) {
+    const mainItem = payload && payload.data ? payload.data : null;
+    const included = Array.isArray(payload && payload.included) ? payload.included : [];
+    if (!mainItem || !mainItem.relationships || !mainItem.relationships.mediaRelationships || included.length === 0) {
+        return [];
+    }
+
+    const roleMap = {
+        sequel: "Sequel",
+        prequel: "Prequel",
+        parent_story: "Parent Story",
+        side_story: "Side Story",
+        spinoff: "Spinoff",
+        alternative_setting: "Alt. Setting",
+        alternative_version: "Alt. Version"
+    };
+    const order = ["Parent Story", "Prequel", "Sequel", "Side Story", "Spinoff", "Alt. Setting", "Alt. Version"];
+
+    const franchiseItems = included
+        .filter(entry => {
+            const type = String(entry && entry.type || "").trim().toLowerCase();
+            return type === "mediarelationships" && entry.attributes && entry.relationships;
+        })
+        .map(entry => {
+            const roleKey = String(entry.attributes.role || "").trim().toLowerCase();
+            const role = roleMap[roleKey];
+            if (!role) return null;
+
+            const destination = entry.relationships &&
+                entry.relationships.destination &&
+                entry.relationships.destination.data
+                ? entry.relationships.destination.data
+                : null;
+            if (!destination) return null;
+
+            const destinationItem = included.find(candidate =>
+                String(candidate && candidate.type || "").trim().toLowerCase() === String(destination.type || "").trim().toLowerCase() &&
+                String(candidate && candidate.id || "") === String(destination.id || "")
+            );
+            if (!destinationItem || !destinationItem.attributes) return null;
+
+            const attributes = destinationItem.attributes || {};
+            const relatedType = inferStremioTypeFromKitsuSubtype(attributes.subtype, "series");
+            const relatedId = `kitsu:${destinationItem.id}`;
+            const relatedTitle = getKitsuPreferredTitle(attributes, config) || `Kitsu ${destinationItem.id}`;
+            const relatedYear = attributes.startDate ? String(attributes.startDate).split("-")[0] : null;
+
+            return {
+                role,
+                title: relatedTitle,
+                year: relatedYear,
+                type: relatedType,
+                id: relatedId
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+
+    const seen = new Set();
+    return franchiseItems
+        .filter(item => {
+            const key = `${item.role}:${item.id}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .map(item => ({
+            name: `${item.role}: ${item.title}${item.year ? ` (${item.year})` : ""}`,
+            category: "Franchise",
+            url: `stremio:///detail/${item.type}/${encodeURIComponent(item.id)}`
+        }));
+}
+
+async function fetchAnimeMappingPayload(kitsuId, episodeNumber = null) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) return null;
+
+    const cleanEpisodeNumber = Number.isFinite(Number(episodeNumber))
+        ? Number.parseInt(String(episodeNumber), 10)
+        : null;
+    const suffix = cleanEpisodeNumber && cleanEpisodeNumber > 0 ? `?ep=${cleanEpisodeNumber}` : "";
+    const cacheKey = `animemapping:kitsu:${normalizedKitsuId}${suffix}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached) return cached;
+
+    try {
+        const response = await fetch(`${ANIME_MAPPING_BASE_URL}/kitsu/${encodeURIComponent(normalizedKitsuId)}${suffix}`, {
+            headers: {
+                Accept: "application/json"
+            }
+        });
+        const payload = await response.json();
+
+        if (response.ok && payload && !payload.error) {
+            await cache.set(cacheKey, payload, withTtlJitter(KITSU_TTL_SECONDS.animeMapping));
+            return payload;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("anime_mapping_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+function getAnimeMappingIds(payload) {
+    const ids = payload &&
+        payload.mappings &&
+        payload.mappings.ids &&
+        typeof payload.mappings.ids === "object"
+        ? payload.mappings.ids
+        : {};
+
+    return {
+        malId: ids.mal ? String(ids.mal).trim() : null,
+        anilistId: ids.anilist ? String(ids.anilist).trim() : null,
+        imdbId: normalizeImdbId(ids.imdb),
+        tmdbId: ids.tmdb ? String(ids.tmdb).trim() : null,
+        tvdbId: ids.tvdb ? String(ids.tvdb).trim() : null,
+        anidbId: ids.anidb ? String(ids.anidb).trim() : null
+    };
+}
+
+function getAnimeMappingTmdbEpisode(payload) {
+    if (!payload || typeof payload !== "object") return null;
+
+    const nestedTmdbEpisode = payload.mappings && typeof payload.mappings === "object"
+        ? payload.mappings.tmdb_episode
+        : null;
+    const directTmdbEpisode = payload.tmdb_episode;
+    const tmdbEpisode = nestedTmdbEpisode || directTmdbEpisode;
+
+    return tmdbEpisode && typeof tmdbEpisode === "object"
+        ? tmdbEpisode
+        : null;
+}
+
+async function fetchTmdbSeasonDetails(tmdbSeriesId, seasonNumber, config = null) {
+    const cleanSeriesId = String(tmdbSeriesId || "").trim();
+    const cleanSeasonNumber = Number.parseInt(String(seasonNumber || ""), 10);
+    if (!cleanSeriesId || !Number.isFinite(cleanSeasonNumber)) return null;
+
+    const cacheKey = `tmdb:season:tv:${cleanSeriesId}:${cleanSeasonNumber}`;
+    let cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached) return cached;
+
+    try {
+        const response = await fetch(
+            `${BASE_URL}/tv/${cleanSeriesId}/season/${cleanSeasonNumber}?api_key=${getTmdbApiKey(config)}&language=it-IT&append_to_response=images&include_image_language=it,en,null`
+        );
+        const payload = await response.json();
+
+        if (response.ok && payload && !payload.status_message) {
+            await cache.set(cacheKey, payload, withTtlJitter(CACHE_TTL_SECONDS.detailsSeries));
+            return payload;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("tmdb_season_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+async function fetchTmdbSeasonImages(tmdbSeriesId, seasonNumber, config = null) {
+    const cleanSeriesId = String(tmdbSeriesId || "").trim();
+    const cleanSeasonNumber = Number.parseInt(String(seasonNumber || ""), 10);
+    if (!cleanSeriesId || !Number.isFinite(cleanSeasonNumber)) return null;
+
+    const cacheKey = `tmdb:season-images:tv:${cleanSeriesId}:${cleanSeasonNumber}`;
+    let cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached) return cached;
+
+    try {
+        const response = await fetch(
+            `${BASE_URL}/tv/${cleanSeriesId}/season/${cleanSeasonNumber}/images?api_key=${getTmdbApiKey(config)}&include_image_language=it,en,null`
+        );
+        const payload = await response.json();
+
+        if (response.ok && payload && !payload.status_message) {
+            await cache.set(cacheKey, payload, withTtlJitter(CACHE_TTL_SECONDS.detailsSeries));
+            return payload;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("tmdb_season_images_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+function getPreferredTmdbPosterUrl(payload) {
+    if (!payload || typeof payload !== "object") return null;
+
+    if (payload.poster_path) {
+        return `https://image.tmdb.org/t/p/w500${payload.poster_path}`;
+    }
+
+    const posters = Array.isArray(payload.posters)
+        ? payload.posters
+        : (payload.images && Array.isArray(payload.images.posters)
+            ? payload.images.posters
+            : []);
+    if (posters.length === 0) return null;
+
+    const preferredPoster =
+        posters.find(entry => entry && entry.iso_639_1 === "it") ||
+        posters.find(entry => entry && entry.iso_639_1 === "en") ||
+        posters.find(entry => entry && entry.iso_639_1 === null) ||
+        posters[0];
+
+    return preferredPoster && preferredPoster.file_path
+        ? `https://image.tmdb.org/t/p/w500${preferredPoster.file_path}`
+        : null;
+}
+
+function findTmdbEpisodeInSeason(seasonPayload, mapping) {
+    const episodes = seasonPayload && Array.isArray(seasonPayload.episodes)
+        ? seasonPayload.episodes
+        : [];
+    if (episodes.length === 0 || !mapping || typeof mapping !== "object") return null;
+
+    const candidateNumbers = [
+        mapping.episode,
+        mapping.rawEpisodeNumber,
+        mapping.absoluteEpisode
+    ]
+        .map(value => Number.parseInt(String(value || ""), 10))
+        .filter(value => Number.isFinite(value));
+    const uniqueCandidateNumbers = [...new Set(candidateNumbers)];
+
+    for (const candidateNumber of uniqueCandidateNumbers) {
+        const matchedEpisode = episodes.find(entry =>
+            Number.parseInt(String(entry && entry.episode_number || ""), 10) === candidateNumber
+        );
+        if (matchedEpisode) return matchedEpisode;
+    }
+
+    if (mapping.airDate) {
+        const matchedByAirDate = episodes.find(entry => String(entry && entry.air_date || "") === mapping.airDate);
+        if (matchedByAirDate) return matchedByAirDate;
+    }
+
+    return null;
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+    const source = Array.isArray(items) ? items : [];
+    const concurrency = Math.max(1, Number.parseInt(String(limit || ""), 10) || 1);
+    const results = new Array(source.length);
+    let currentIndex = 0;
+
+    const workers = Array.from({ length: Math.min(concurrency, source.length) }, async () => {
+        while (true) {
+            const index = currentIndex;
+            currentIndex += 1;
+            if (index >= source.length) break;
+
+            try {
+                results[index] = await mapper(source[index], index);
+            } catch (error) {
+                results[index] = null;
+            }
+        }
+    });
+
+    await Promise.all(workers);
+    return results;
+}
+
+function extractKitsuMappings(payload) {
+    const out = {
+        imdbId: null,
+        tmdbId: null,
+        tmdbType: null,
+        tvdbId: null,
+        malId: null,
+        anilistId: null
+    };
+
+    const included = Array.isArray(payload && payload.included) ? payload.included : [];
+    for (const entry of included) {
+        const type = String(entry && entry.type || "").trim().toLowerCase();
+        if (type !== "mapping" && type !== "mappings") continue;
+
+        const attributes = entry.attributes || {};
+        const site = String(attributes.externalSite || "").trim().toLowerCase();
+        const externalId = String(attributes.externalId || "").trim();
+        if (!externalId) continue;
+
+        if (!out.malId && (site === "myanimelist/anime" || site === "mal")) {
+            out.malId = externalId;
+            continue;
+        }
+
+        if (!out.anilistId && (site === "anilist/anime" || site === "anilist")) {
+            out.anilistId = externalId;
+            continue;
+        }
+
+        if (!out.imdbId && (site === "imdb/anime" || site === "imdb/movie")) {
+            out.imdbId = normalizeImdbId(externalId) || externalId;
+            continue;
+        }
+
+        if (!out.tmdbId && (site === "themoviedb/anime" || site === "themoviedb/movie" || site === "themoviedb/tv")) {
+            out.tmdbId = externalId;
+            if (site.endsWith("/movie")) out.tmdbType = "movie";
+            if (site.endsWith("/tv")) out.tmdbType = "tv";
+            continue;
+        }
+
+        if (!out.tvdbId && (site === "thetvdb/anime" || site === "thetvdb/series")) {
+            out.tvdbId = externalId;
+        }
+    }
+
+    return out;
+}
+
+async function fetchTmdbDetails(typePath, tmdbId, config = null) {
+    if (!tmdbId) return null;
+
+    const resolvedConfig = getRequestConfig(config);
+    const cacheKey = `tmdb:details:${typePath}:${tmdbId}`;
+    let details = await cache.get(cacheKey);
+    if (isNegativeCache(details)) return null;
+
+    if (!details) {
+        const detailsUrl = `${BASE_URL}/${typePath}/${tmdbId}?api_key=${getTmdbApiKey(resolvedConfig)}&language=it-IT&append_to_response=external_ids,credits,similar,videos,images,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+
+        try {
+            const detailsRes = await fetch(detailsUrl);
+            details = await detailsRes.json();
+        } catch (error) {
+            details = null;
+        }
+
+        if (details && !details.status_message) {
+            const detailsTtl = typePath === "movie" ? CACHE_TTL_SECONDS.detailsMovie : CACHE_TTL_SECONDS.detailsSeries;
+            await cache.set(cacheKey, details, withTtlJitter(detailsTtl));
+        } else {
+            await cache.set(cacheKey, createNegativeCache("details_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+            return null;
+        }
+    }
+
+    return details;
+}
+
+async function resolveTmdbIdFromImdb(imdbId, requestedType, config = null) {
+    const normalizedImdbId = normalizeImdbId(imdbId);
+    if (!normalizedImdbId) return null;
+
+    const cacheKey = `tmdb:find:imdb:${requestedType}:${normalizedImdbId}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached && cached.tmdbId) return cached.tmdbId;
+
+    try {
+        const response = await fetch(`${BASE_URL}/find/${normalizedImdbId}?api_key=${getTmdbApiKey(config)}&external_source=imdb_id`);
+        const payload = await response.json();
+        const results = requestedType === "series" ? payload.tv_results : payload.movie_results;
+        const tmdbId = Array.isArray(results) && results[0] && results[0].id
+            ? String(results[0].id)
+            : null;
+
+        if (tmdbId) {
+            await cache.set(cacheKey, { tmdbId }, withTtlJitter(CACHE_TTL_SECONDS.detailsSeries));
+            return tmdbId;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("tmdb_find_imdb_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+async function fetchValidatedAnimeTmdbDetails(typePath, tmdbId, config = null) {
+    const details = await fetchTmdbDetails(typePath, tmdbId, config);
+    if (!details) {
+        return { details: null, rejectedNonAnime: false };
+    }
+
+    if (isTmdbAnimeDetails(details)) {
+        return { details, rejectedNonAnime: false };
+    }
+
+    return { details: null, rejectedNonAnime: true };
+}
+
+async function fetchKitsuAnimeById(kitsuId) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) return null;
+
+    const cacheKey = `kitsu:anime:v2:${normalizedKitsuId}`;
+    let cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached) {
+        if (isDeletedKitsuPayload(cached)) {
+            await cache.set(cacheKey, createNegativeCache("kitsu_anime_deleted"), NEGATIVE_CACHE_TTL_SECONDS);
+            return null;
+        }
+        return cached;
+    }
+
+    try {
+        const response = await fetch(`${KITSU_BASE_URL}/anime/${encodeURIComponent(normalizedKitsuId)}?include=mediaRelationships.destination,categories,mappings`, {
+            headers: {
+                Accept: "application/vnd.api+json, application/json"
+            }
+        });
+        const payload = await response.json();
+
+        if (response.ok && payload && payload.data && !payload.errors && !isDeletedKitsuPayload(payload)) {
+            await cache.set(cacheKey, payload, withTtlJitter(KITSU_TTL_SECONDS.anime));
+            return payload;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("kitsu_anime_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+async function fetchKitsuSearchResults(query) {
+    const cleanQuery = String(query || "").trim();
+    if (!cleanQuery) return null;
+
+    const cacheKey = `kitsu:search:${normalizeMatchTitle(cleanQuery)}`;
+    let cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached) return cached;
+
+    try {
+        const response = await fetch(`${KITSU_BASE_URL}/anime?filter[text]=${encodeURIComponent(cleanQuery)}&page[limit]=6`, {
+            headers: {
+                Accept: "application/vnd.api+json, application/json"
+            }
+        });
+        const payload = await response.json();
+
+        if (response.ok && payload && !payload.errors) {
+            await cache.set(cacheKey, payload, withTtlJitter(KITSU_TTL_SECONDS.search));
+            return payload;
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("kitsu_search_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+async function fetchKitsuEpisodes(kitsuId) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) return [];
+
+    const cacheKey = `kitsu:episodes:${normalizedKitsuId}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return [];
+    if (cached) return cached;
+
+    const episodes = [];
+    let offset = 0;
+    let hasNext = true;
+    let pageSafetyCounter = 0;
+
+    try {
+        while (hasNext && pageSafetyCounter < 50) {
+            const response = await fetch(`${KITSU_BASE_URL}/anime/${encodeURIComponent(normalizedKitsuId)}/episodes?page[limit]=20&page[offset]=${offset}&sort=number`, {
+                headers: {
+                    Accept: "application/vnd.api+json, application/json"
+                }
+            });
+            const payload = await response.json();
+            const data = Array.isArray(payload && payload.data) ? payload.data : [];
+
+            if (!response.ok || payload.errors) {
+                throw new Error(`Kitsu episodes request failed for ${normalizedKitsuId}`);
+            }
+
+            if (data.length === 0) {
+                hasNext = false;
+                break;
+            }
+
+            episodes.push(...data);
+            hasNext = !!(payload.links && payload.links.next);
+            offset += data.length;
+            pageSafetyCounter += 1;
+        }
+
+        await cache.set(cacheKey, episodes, withTtlJitter(KITSU_TTL_SECONDS.episodes));
+        return episodes;
+    } catch (error) {
+        await cache.set(cacheKey, createNegativeCache("kitsu_episodes_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+        return [];
+    }
+}
+
+async function resolveKitsuFromExternalSite(externalSite, externalId) {
+    const site = String(externalSite || "").trim().toLowerCase();
+    const cleanExternalId = String(externalId || "").trim();
+    if (!site || !cleanExternalId) return null;
+
+    const cacheKey = `kitsu:external:${site}:${cleanExternalId}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return null;
+    if (cached && cached.kitsuId) return cached.kitsuId;
+
+    try {
+        const response = await fetch(
+            `${KITSU_BASE_URL}/mappings?filter[externalSite]=${encodeURIComponent(site)}&filter[externalId]=${encodeURIComponent(cleanExternalId)}&include=item&page[limit]=1`,
+            {
+                headers: {
+                    Accept: "application/vnd.api+json, application/json"
+                }
+            }
+        );
+        const payload = await response.json();
+
+        const relatedId = payload && payload.data && payload.data[0] && payload.data[0].relationships &&
+            payload.data[0].relationships.item && payload.data[0].relationships.item.data
+            ? payload.data[0].relationships.item.data.id
+            : null;
+        const includedId = Array.isArray(payload && payload.included)
+            ? (payload.included.find(entry => String(entry && entry.type || "").trim().toLowerCase() === "anime") || {}).id
+            : null;
+        const kitsuId = relatedId || includedId || null;
+
+        if (response.ok && kitsuId) {
+            await cache.set(cacheKey, { kitsuId: String(kitsuId) }, withTtlJitter(KITSU_TTL_SECONDS.externalLookup));
+            return String(kitsuId);
+        }
+    } catch (error) {
+        // Fall through to negative cache below.
+    }
+
+    await cache.set(cacheKey, createNegativeCache("kitsu_external_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+    return null;
+}
+
+function scoreKitsuSearchCandidate(entry, info = {}) {
+    const attributes = entry && entry.attributes ? entry.attributes : {};
+    const expectedTitles = uniqueNonEmptyStrings([
+        info.originalTitle,
+        info.title
+    ]).map(normalizeMatchTitle).filter(Boolean);
+    const candidateTitles = getKitsuTitleCandidates(attributes).map(normalizeMatchTitle).filter(Boolean);
+
+    if (expectedTitles.length === 0 || candidateTitles.length === 0) return -1;
+
+    let score = 0;
+    if (candidateTitles.some(title => expectedTitles.includes(title))) {
+        score += 120;
+    } else if (candidateTitles.some(title => expectedTitles.some(expected => title.startsWith(expected) || expected.startsWith(title)))) {
+        score += 90;
+    } else if (candidateTitles.some(title => expectedTitles.some(expected => title.includes(expected) || expected.includes(title)))) {
+        score += 60;
+    } else {
+        score += 10;
+    }
+
+    const expectedYear = getYearFromValue(info.year);
+    const candidateYear = getYearFromValue(attributes.startDate);
+    if (expectedYear && candidateYear) {
+        if (candidateYear === expectedYear) score += 20;
+        else if (Math.abs(candidateYear - expectedYear) === 1) score += 10;
+        else score -= 10;
+    }
+
+    if (info.requestedType) {
+        const candidateType = inferStremioTypeFromKitsuSubtype(attributes.subtype, "series");
+        if (candidateType === info.requestedType) score += 15;
+        else score -= 15;
+    }
+
+    const expectedEpisodes = Number.parseInt(String(info.episodeCount || ""), 10);
+    const candidateEpisodes = Number.parseInt(String(attributes.episodeCount || ""), 10);
+    if (Number.isFinite(expectedEpisodes) && expectedEpisodes > 0 && Number.isFinite(candidateEpisodes) && candidateEpisodes > 0) {
+        if (candidateEpisodes === expectedEpisodes) score += 15;
+        else if (Math.abs(candidateEpisodes - expectedEpisodes) <= 2) score += 8;
+        else score -= 8;
+    }
+
+    return score;
+}
+
+async function resolveKitsuByTitle(info = {}) {
+    const queries = uniqueNonEmptyStrings([
+        info.originalTitle,
+        info.title
+    ]);
+
+    let bestId = null;
+    let bestScore = -1;
+
+    for (const query of queries) {
+        const payload = await fetchKitsuSearchResults(query);
+        const candidates = Array.isArray(payload && payload.data) ? payload.data : [];
+
+        for (const candidate of candidates) {
+            const score = scoreKitsuSearchCandidate(candidate, info);
+            if (score > bestScore) {
+                bestScore = score;
+                bestId = candidate && candidate.id ? String(candidate.id) : null;
+            }
+        }
+
+        if (bestScore >= 120) break;
+    }
+
+    return bestScore >= 60 ? bestId : null;
+}
+
+async function resolveKitsuIdForAnimeMedia(item, details, stremioType) {
+    const tmdbType = stremioType === "series" ? "tv" : "movie";
+    const tmdbId = details && details.id ? String(details.id) : (item && item.id ? String(item.id) : null);
+    const externalIds = details && details.external_ids ? details.external_ids : {};
+    const lookupCandidates = [];
+
+    if (tmdbId) {
+        if (tmdbType === "movie") {
+            lookupCandidates.push(["themoviedb/movie", tmdbId], ["themoviedb/anime", tmdbId]);
+        } else {
+            lookupCandidates.push(["themoviedb/tv", tmdbId], ["themoviedb/anime", tmdbId]);
+        }
+    }
+
+    const imdbId = normalizeImdbId(externalIds.imdb_id);
+    if (imdbId) {
+        lookupCandidates.push(["imdb/movie", imdbId], ["imdb/anime", imdbId]);
+        if (/^tt\d+$/i.test(imdbId)) {
+            const numericImdbId = imdbId.slice(2);
+            lookupCandidates.push(["imdb/movie", numericImdbId], ["imdb/anime", numericImdbId]);
+        }
+    }
+
+    const tvdbId = externalIds.tvdb_id ? String(externalIds.tvdb_id).trim() : "";
+    if (tvdbId) {
+        lookupCandidates.push(["thetvdb/series", tvdbId], ["thetvdb/anime", tvdbId]);
+    }
+
+    for (const [site, externalId] of lookupCandidates) {
+        const kitsuId = await resolveKitsuFromExternalSite(site, externalId);
+        if (kitsuId) return kitsuId;
+    }
+
+    return resolveKitsuByTitle({
+        title: details && (details.title || details.name) ? (details.title || details.name) : (item ? (item.title || item.name) : null),
+        originalTitle: details && (details.original_title || details.original_name) ? (details.original_title || details.original_name) : (item ? (item.original_title || item.original_name) : null),
+        year: details && (details.release_date || details.first_air_date) ? (details.release_date || details.first_air_date) : (item ? (item.release_date || item.first_air_date) : null),
+        episodeCount: details && details.number_of_episodes ? details.number_of_episodes : null,
+        requestedType: stremioType
+    });
+}
+
+async function resolveTmdbDetailsFromKitsuPayload(payload, requestedType, config = null) {
+    const mappings = extractKitsuMappings(payload);
+    const animeMappingPayload = await fetchAnimeMappingPayload(payload && payload.data ? payload.data.id : null);
+    const animeMappingIds = getAnimeMappingIds(animeMappingPayload);
+    const requestedTypePath = requestedType === "series" ? "tv" : "movie";
+    let rejectedNonAnime = false;
+
+    const tryTmdbCandidate = async (typePath, tmdbId) => {
+        const result = await fetchValidatedAnimeTmdbDetails(typePath, tmdbId, config);
+        if (result.rejectedNonAnime) {
+            rejectedNonAnime = true;
+        }
+        return result.details;
+    };
+
+    if (animeMappingIds.tmdbId) {
+        const details = await tryTmdbCandidate(requestedTypePath, animeMappingIds.tmdbId);
+        if (details) return { details, rejectedNonAnime };
+    }
+
+    if (mappings.tmdbId) {
+        const preferredTypePath = mappings.tmdbType || requestedTypePath;
+        let details = await tryTmdbCandidate(preferredTypePath, mappings.tmdbId);
+        if (!details && preferredTypePath !== requestedTypePath) {
+            details = await tryTmdbCandidate(requestedTypePath, mappings.tmdbId);
+        }
+        if (details) return { details, rejectedNonAnime };
+    }
+
+    if (animeMappingIds.imdbId) {
+        const tmdbId = await resolveTmdbIdFromImdb(animeMappingIds.imdbId, requestedType, config);
+        if (tmdbId) {
+            const details = await tryTmdbCandidate(requestedTypePath, tmdbId);
+            if (details) return { details, rejectedNonAnime };
+        }
+    }
+
+    if (mappings.imdbId) {
+        const tmdbId = await resolveTmdbIdFromImdb(mappings.imdbId, requestedType, config);
+        if (tmdbId) {
+            const details = await tryTmdbCandidate(requestedTypePath, tmdbId);
+            if (details) return { details, rejectedNonAnime };
+        }
+    }
+
+    return { details: null, rejectedNonAnime };
+}
+
+function buildKitsuEpisodeVideos(kitsuId, episodes, fallbackEpisodeCount = 0, config = null) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) return [];
+
+    const seenEpisodes = new Set();
+    let normalizedEpisodes = Array.isArray(episodes)
+        ? episodes
+            .map(entry => {
+                const attributes = entry && entry.attributes ? entry.attributes : entry || {};
+                const episodeNumber = Number.parseInt(String(attributes.number || attributes.episode || ""), 10);
+                if (!Number.isFinite(episodeNumber) || episodeNumber <= 0 || seenEpisodes.has(episodeNumber)) return null;
+                seenEpisodes.add(episodeNumber);
+
+                const thumbnail = attributes.thumbnail && typeof attributes.thumbnail === "object"
+                    ? (attributes.thumbnail.original || attributes.thumbnail.large || attributes.thumbnail.medium || null)
+                    : (attributes.thumbnail || null);
+
+                return {
+                    number: episodeNumber,
+                    title: getKitsuPreferredTitle(attributes, config, { includeSlug: false }) || `Episodio ${episodeNumber}`,
+                    released: safeToIsoString(attributes.airdate || attributes.released),
+                    thumbnail: thumbnail,
+                    overview: attributes.synopsis || attributes.overview || null
+                };
+            })
+            .filter(Boolean)
+        : [];
+
+    if (normalizedEpisodes.length === 0) {
+        const safeCount = Math.min(
+            Math.max(Number.parseInt(String(fallbackEpisodeCount || ""), 10) || 0, 0),
+            300
+        );
+        normalizedEpisodes = Array.from({ length: safeCount }, (_, index) => {
+            const episodeNumber = index + 1;
+            return {
+                number: episodeNumber,
+                title: `Episodio ${episodeNumber}`,
+                released: null,
+                thumbnail: null,
+                overview: null
+            };
+        });
+    }
+
+    normalizedEpisodes.sort((a, b) => a.number - b.number);
+
+    return normalizedEpisodes.map(episode => ({
+        id: `kitsu:${normalizedKitsuId}:${episode.number}`,
+        title: episode.title,
+        season: 1,
+        episode: episode.number,
+        released: episode.released,
+        thumbnail: episode.thumbnail || undefined,
+        overview: episode.overview || undefined
+    }));
+}
+
+async function enrichKitsuEpisodeVideosWithAnimeMapping(kitsuId, videos, tmdbDetails, config = null) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    const baseVideos = Array.isArray(videos) ? videos : [];
+    if (!normalizedKitsuId || baseVideos.length === 0) return baseVideos;
+
+    const validatedTmdbDetails = isTmdbAnimeDetails(tmdbDetails) ? tmdbDetails : null;
+    const tmdbSeriesId = validatedTmdbDetails && validatedTmdbDetails.id
+        ? String(validatedTmdbDetails.id)
+        : null;
+    const imdbId = normalizeImdbId(
+        validatedTmdbDetails && validatedTmdbDetails.external_ids ? validatedTmdbDetails.external_ids.imdb_id : null
+    );
+    if (!tmdbSeriesId) return baseVideos;
+
+    const episodeMappings = await mapWithConcurrency(baseVideos, 8, async (video) => {
+        const absoluteEpisode = Number.parseInt(String(video && video.episode || ""), 10);
+        if (!Number.isFinite(absoluteEpisode) || absoluteEpisode <= 0) return null;
+
+        const payload = await fetchAnimeMappingPayload(normalizedKitsuId, absoluteEpisode);
+        const tmdbEpisode = getAnimeMappingTmdbEpisode(payload);
+        if (!tmdbEpisode || !tmdbEpisode.id || String(tmdbEpisode.id) !== tmdbSeriesId) return null;
+
+        const seasonNumber = Number.parseInt(String(tmdbEpisode.season || ""), 10);
+        const episodeNumber = Number.parseInt(String(tmdbEpisode.episode || ""), 10);
+        if (!Number.isFinite(seasonNumber) || !Number.isFinite(episodeNumber)) return null;
+
+        return {
+            season: seasonNumber,
+            episode: episodeNumber,
+            rawEpisodeNumber: Number.parseInt(String(tmdbEpisode.rawEpisodeNumber || ""), 10),
+            absoluteEpisode: Number.parseInt(String(tmdbEpisode.absoluteEpisode || ""), 10),
+            airDate: typeof tmdbEpisode.airdate === "string" ? tmdbEpisode.airdate : null
+        };
+    });
+
+    const requiredSeasons = [...new Set(
+        episodeMappings
+            .filter(Boolean)
+            .map(item => item.season)
+            .filter(season => Number.isFinite(season))
+    )];
+    const seasonPayloads = new Map();
+
+    if (tmdbSeriesId && requiredSeasons.length > 0) {
+        const seasons = await Promise.all(requiredSeasons.map(async seasonNumber => {
+            const payload = await fetchTmdbSeasonDetails(tmdbSeriesId, seasonNumber, config);
+            return [seasonNumber, payload];
+        }));
+
+        seasons.forEach(([seasonNumber, payload]) => {
+            if (payload) seasonPayloads.set(seasonNumber, payload);
+        });
+    }
+
+    return baseVideos.map((video, index) => {
+        const mapping = episodeMappings[index];
+        if (!mapping) return video;
+
+        const seasonPayload = seasonPayloads.get(mapping.season);
+        const tmdbEpisode = findTmdbEpisodeInSeason(seasonPayload, mapping);
+
+        const episodeMediaId = tmdbSeriesId
+            ? `${getPrimaryMediaId(imdbId, tmdbSeriesId)}:${mapping.season}:${mapping.episode}`
+            : null;
+        const configuredKitsuThumbnailId = video && typeof video.id === "string" && video.id.startsWith("kitsu:")
+            ? video.id
+            : null;
+        const configuredThumbnailUrl = configuredKitsuThumbnailId
+            ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, configuredKitsuThumbnailId)
+            : (episodeMediaId
+                ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, episodeMediaId)
+                : null);
+        const tmdbThumbnail = tmdbEpisode && tmdbEpisode.still_path
+            ? `https://image.tmdb.org/t/p/w500${tmdbEpisode.still_path}`
+            : null;
+        const tmdbReleased = tmdbEpisode && tmdbEpisode.air_date ? safeToIsoString(tmdbEpisode.air_date) : null;
+
+        return {
+            ...video,
+            title: /^episodio\s+\d+$/i.test(String(video.title || "")) && tmdbEpisode && tmdbEpisode.name
+                ? tmdbEpisode.name
+                : video.title,
+            released: video.released || tmdbReleased || undefined,
+            thumbnail: configuredThumbnailUrl || tmdbThumbnail || video.thumbnail,
+            overview: (tmdbEpisode && tmdbEpisode.overview) || video.overview || undefined
+        };
+    });
+}
+
+async function resolvePreferredKitsuPoster(kitsuId, requestedType, config = null, tmdbDetails = null) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) {
+        return { poster: null, tmdbId: null, imdbId: null };
+    }
+
+    const requestedTypePath = requestedType === "series" ? "tv" : "movie";
+    let validatedTmdbDetails = isTmdbAnimeDetails(tmdbDetails) ? tmdbDetails : null;
+
+    if (!validatedTmdbDetails) {
+        const animeMappingPayload = await fetchAnimeMappingPayload(normalizedKitsuId);
+        const animeMappingIds = getAnimeMappingIds(animeMappingPayload);
+
+        if (animeMappingIds.tmdbId) {
+            const validatedDetailsResult = await fetchValidatedAnimeTmdbDetails(requestedTypePath, animeMappingIds.tmdbId, config);
+            validatedTmdbDetails = validatedDetailsResult.details;
+        }
+
+        if (!validatedTmdbDetails && animeMappingIds.imdbId) {
+            const resolvedTmdbId = await resolveTmdbIdFromImdb(animeMappingIds.imdbId, requestedType, config);
+            if (resolvedTmdbId) {
+                const validatedDetailsResult = await fetchValidatedAnimeTmdbDetails(requestedTypePath, resolvedTmdbId, config);
+                validatedTmdbDetails = validatedDetailsResult.details;
+            }
+        }
+    }
+
+    const tmdbId = validatedTmdbDetails && validatedTmdbDetails.id ? String(validatedTmdbDetails.id) : null;
+    const imdbId = normalizeImdbId(
+        validatedTmdbDetails && validatedTmdbDetails.external_ids ? validatedTmdbDetails.external_ids.imdb_id : null
+    );
+
+    let poster = null;
+
+    if (requestedType === "series" && tmdbId) {
+        const firstEpisodeMapping = await fetchAnimeMappingPayload(normalizedKitsuId, 1);
+        const tmdbEpisode = getAnimeMappingTmdbEpisode(firstEpisodeMapping);
+        const seasonTmdbId = tmdbEpisode && tmdbEpisode.id ? String(tmdbEpisode.id) : null;
+        const seasonNumber = Number.parseInt(String(tmdbEpisode && tmdbEpisode.season || ""), 10);
+
+        if (seasonTmdbId && seasonTmdbId === tmdbId && Number.isFinite(seasonNumber) && seasonNumber > 0) {
+            const seasonImagesPayload = await fetchTmdbSeasonImages(seasonTmdbId, seasonNumber, config);
+            poster = getPreferredTmdbPosterUrl(seasonImagesPayload);
+
+            const seasonPayload = await fetchTmdbSeasonDetails(seasonTmdbId, seasonNumber, config);
+            if (!poster) {
+                poster = getPreferredTmdbPosterUrl(seasonPayload);
+            }
+        }
+    }
+
+    if (!poster && validatedTmdbDetails) {
+        poster = getPreferredTmdbPosterUrl(validatedTmdbDetails);
+    }
+
+    return { poster, tmdbId, imdbId };
+}
+
+async function fetchPreferredKitsuSeasonDetails(kitsuId, config = null, tmdbDetails = null) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId) return null;
+    if (!isTmdbAnimeDetails(tmdbDetails) || !tmdbDetails.id) return null;
+
+    const firstEpisodeMapping = await fetchAnimeMappingPayload(normalizedKitsuId, 1);
+    const tmdbEpisode = getAnimeMappingTmdbEpisode(firstEpisodeMapping);
+    const seasonTmdbId = tmdbEpisode && tmdbEpisode.id ? String(tmdbEpisode.id) : null;
+    const seasonNumber = Number.parseInt(String(tmdbEpisode && tmdbEpisode.season || ""), 10);
+    if (!seasonTmdbId || seasonTmdbId !== String(tmdbDetails.id) || !Number.isFinite(seasonNumber) || seasonNumber <= 0) return null;
+
+    return fetchTmdbSeasonDetails(seasonTmdbId, seasonNumber, config);
+}
+
+function buildKitsuMetaFromPayload(kitsuId, payload, requestedType, config = null, options = {}) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    const data = payload && payload.data ? payload.data : {};
+    const attributes = data.attributes || {};
+    const mappings = extractKitsuMappings(payload);
+    const resolvedConfig = getRequestConfig(config);
+    const metaId = `kitsu:${normalizedKitsuId}`;
+    const allowMappedAssets = options.allowMappedAssets !== false;
+    const assetImdbId = allowMappedAssets ? mappings.imdbId : null;
+    const assetTmdbId = allowMappedAssets ? mappings.tmdbId : null;
+
+    let poster = getKitsuPoster(attributes);
+    const configuredPosterUrl = getConfiguredAssetUrl(resolvedConfig, "poster", assetImdbId, assetTmdbId, metaId);
+    if (configuredPosterUrl) poster = configuredPosterUrl;
+
+    let background = getKitsuBackground(attributes);
+    const configuredBackdropUrl = getConfiguredAssetUrl(resolvedConfig, "backdrop", assetImdbId, assetTmdbId, metaId);
+    if (configuredBackdropUrl) background = configuredBackdropUrl;
+
+    let logo = "";
+    const configuredLogoUrl = getConfiguredAssetUrl(resolvedConfig, "logo", assetImdbId, assetTmdbId, metaId);
+    if (configuredLogoUrl) logo = configuredLogoUrl;
+
+    const releaseInfo = attributes.startDate ? String(attributes.startDate).split("-")[0] : null;
+    const type = inferStremioTypeFromKitsuSubtype(attributes.subtype, requestedType || "series");
+    const franchiseLinks = getKitsuFranchiseLinks(payload, config);
+
+    const meta = {
+        id: metaId,
+        type,
+        name: getKitsuPreferredTitle(attributes, config) || `Kitsu ${normalizedKitsuId}`,
+        poster: poster || undefined,
+        background: background || undefined,
+        logo: logo || undefined,
+        description: attributes.synopsis || attributes.description || undefined,
+        releaseInfo: releaseInfo || undefined,
+        released: safeToIsoString(attributes.startDate),
+        year: releaseInfo || undefined,
+        imdbRating: attributes.averageRating ? (parseFloat(attributes.averageRating) / 10).toFixed(1) : null,
+        runtime: attributes.episodeLength
+            ? `${attributes.episodeLength} min`
+            : (attributes.totalLength ? `${attributes.totalLength} min` : null),
+        genres: getKitsuCategories(payload),
+        links: franchiseLinks,
+        behaviorHints: {}
+    };
+
+    if (type === "movie") {
+        meta.behaviorHints.defaultVideoId = metaId;
+    } else {
+        meta.behaviorHints.hasScheduledVideos = true;
+    }
+
+    return meta;
+}
+
+async function buildKitsuMetaForPayload(kitsuId, payload, requestedType, config = null, options = {}) {
+    const normalizedKitsuId = normalizeKitsuId(kitsuId);
+    if (!normalizedKitsuId || !payload || !payload.data) return null;
+
+    const attributes = payload.data.attributes || {};
+    const kitsuPreferredTitle = getKitsuPreferredTitle(attributes, config) || `Kitsu ${normalizedKitsuId}`;
+    const includeEpisodeVideos = options.includeEpisodeVideos === true;
+    const tmdbResolution = await resolveTmdbDetailsFromKitsuPayload(payload, requestedType, config);
+    const tmdbDetails = tmdbResolution && tmdbResolution.details ? tmdbResolution.details : null;
+    const rejectedNonAnime = !!(tmdbResolution && tmdbResolution.rejectedNonAnime);
+    let meta = null;
+
+    if (tmdbDetails) {
+        meta = await transformToMeta(tmdbDetails, requestedType, config, { includeVideos: false });
+    }
+
+    if (!meta) {
+        meta = buildKitsuMetaFromPayload(normalizedKitsuId, payload, requestedType, config, {
+            allowMappedAssets: !rejectedNonAnime
+        });
+    }
+
+    if (!meta) return null;
+
+    meta.id = `kitsu:${normalizedKitsuId}`;
+    meta.type = requestedType;
+    meta.name = kitsuPreferredTitle;
+    meta.behaviorHints = meta.behaviorHints || {};
+
+    const preferredPoster = await resolvePreferredKitsuPoster(normalizedKitsuId, requestedType, config, tmdbDetails);
+    const preferredSeasonDetails = requestedType === "series"
+        ? await fetchPreferredKitsuSeasonDetails(normalizedKitsuId, config, tmdbDetails)
+        : null;
+    const configuredPosterUrl = getConfiguredAssetUrl(
+        getRequestConfig(config),
+        "poster",
+        preferredPoster.imdbId,
+        preferredPoster.tmdbId || (tmdbDetails && tmdbDetails.id ? String(tmdbDetails.id) : null),
+        meta.id
+    );
+    const configuredBackdropUrl = getConfiguredAssetUrl(
+        getRequestConfig(config),
+        "backdrop",
+        preferredPoster.imdbId,
+        preferredPoster.tmdbId || (tmdbDetails && tmdbDetails.id ? String(tmdbDetails.id) : null),
+        meta.id
+    );
+    const configuredLogoUrl = getConfiguredAssetUrl(
+        getRequestConfig(config),
+        "logo",
+        preferredPoster.imdbId,
+        preferredPoster.tmdbId || (tmdbDetails && tmdbDetails.id ? String(tmdbDetails.id) : null),
+        meta.id
+    );
+    meta.poster = configuredPosterUrl || preferredPoster.poster || meta.poster;
+    if (configuredBackdropUrl) meta.background = configuredBackdropUrl;
+    if (configuredLogoUrl) meta.logo = configuredLogoUrl;
+    if (preferredSeasonDetails && preferredSeasonDetails.overview) {
+        meta.description = preferredSeasonDetails.overview;
+    }
+    meta.links = Array.isArray(meta.links) ? [...meta.links] : [];
+
+    const franchiseLinks = getKitsuFranchiseLinks(payload, config);
+    if (franchiseLinks.length > 0) {
+        const seenLinks = new Set(meta.links.map(link => `${link.category || ""}:${link.url || ""}`));
+        franchiseLinks.forEach(link => {
+            const key = `${link.category || ""}:${link.url || ""}`;
+            if (seenLinks.has(key)) return;
+            seenLinks.add(key);
+            meta.links.push(link);
+        });
+    }
+
+    delete meta.videos;
+
+    if (requestedType === "series") {
+        if (includeEpisodeVideos) {
+            const fallbackEpisodeCount = tmdbDetails && tmdbDetails.number_of_episodes
+                ? tmdbDetails.number_of_episodes
+                : Number.parseInt(String(payload.data.attributes && payload.data.attributes.episodeCount || ""), 10);
+            const episodes = await fetchKitsuEpisodes(normalizedKitsuId);
+            let videos = buildKitsuEpisodeVideos(normalizedKitsuId, episodes, fallbackEpisodeCount, config);
+            videos = await enrichKitsuEpisodeVideosWithAnimeMapping(normalizedKitsuId, videos, tmdbDetails, config);
+
+            if (videos.length > 0) {
+                meta.videos = videos;
+            }
+        }
+
+        delete meta.behaviorHints.defaultVideoId;
+        meta.behaviorHints.hasScheduledVideos = true;
+    } else {
+        meta.behaviorHints.defaultVideoId = `kitsu:${normalizedKitsuId}`;
+        delete meta.behaviorHints.hasScheduledVideos;
+    }
+
+    return meta;
+}
+
+async function buildMetaForKitsuId(requestedType, id, config = null) {
+    const kitsuId = normalizeKitsuId(id);
+    if (!kitsuId) return null;
+
+    const payload = await fetchKitsuAnimeById(kitsuId);
+    return buildKitsuMetaForPayload(kitsuId, payload, requestedType, config, { includeEpisodeVideos: requestedType === "series" });
+}
+
+function isKitsuCatalogId(catalogId) {
+    return String(catalogId || "").startsWith("kitsu.");
+}
+
+function isTop10CatalogId(catalogId) {
+    const normalizedCatalogId = String(catalogId || "").trim();
+    return normalizedCatalogId.startsWith(TOP10_MANIFEST_PREFIX) || normalizedCatalogId.startsWith(LEGACY_TOP10_MANIFEST_PREFIX);
+}
+
+async function mapKitsuCatalogItemToMeta(item, forcedType = null, config = null, options = {}) {
+    if (!item || !item.attributes) return null;
+
+    const attributes = item.attributes || {};
+    if (isDeletedKitsuAttributes(attributes)) return null;
+    const type = forcedType || inferStremioTypeFromKitsuSubtype(attributes.subtype, "series");
+    const enrichCatalogMeta = options.enrichCatalogMeta !== false;
+
+    if (enrichCatalogMeta) {
+        const payload = await fetchKitsuAnimeById(item.id);
+        if (!payload || !payload.data) return null;
+        const richMeta = await buildKitsuMetaForPayload(item.id, payload, type, config, { includeEpisodeVideos: false });
+        if (richMeta) return richMeta;
+    }
+
+    const releaseInfo = attributes.startDate ? String(attributes.startDate).split("-")[0] : null;
+    const metaId = `kitsu:${item.id}`;
+    const preferredPoster = await resolvePreferredKitsuPoster(item.id, type, config);
+    const configuredPosterUrl = getConfiguredAssetUrl(getRequestConfig(config), "poster", preferredPoster.imdbId, preferredPoster.tmdbId, metaId);
+    const configuredBackdropUrl = getConfiguredAssetUrl(getRequestConfig(config), "backdrop", preferredPoster.imdbId, preferredPoster.tmdbId, metaId);
+
+    return {
+        id: metaId,
+        type,
+        name: getKitsuPreferredTitle(attributes, config) || `Kitsu ${item.id}`,
+        poster: configuredPosterUrl || preferredPoster.poster || getKitsuPoster(attributes) || undefined,
+        background: configuredBackdropUrl || getKitsuBackground(attributes) || undefined,
+        description: attributes.synopsis || attributes.description || undefined,
+        releaseInfo: releaseInfo || undefined,
+        released: safeToIsoString(attributes.startDate),
+        imdbRating: attributes.averageRating ? (parseFloat(attributes.averageRating) / 10).toFixed(1) : null,
+        behaviorHints: {
+            defaultVideoId: type === "movie" ? metaId : null,
+            hasScheduledVideos: type === "series"
+        }
+    };
+}
+
+function filterKitsuCatalogItemsBySubtype(items, allowedSubtypes = []) {
+    if (!Array.isArray(items) || allowedSubtypes.length === 0) return Array.isArray(items) ? items : [];
+
+    const allowed = new Set(
+        allowedSubtypes
+            .map(subtype => String(subtype || "").trim().toLowerCase())
+            .filter(Boolean)
+    );
+
+    return items.filter(item => {
+        const itemSubtype = item && item.attributes && item.attributes.subtype
+            ? String(item.attributes.subtype).trim().toLowerCase()
+            : "";
+        return allowed.has(itemSubtype);
+    });
+}
+
+async function fetchKitsuCatalogMetas(catalogId, requestedType, extra = {}, config = null) {
+    const normalizedCatalogId = String(catalogId || "").trim();
+    const skip = Math.max(0, Number.parseInt(String(extra && extra.skip || "0"), 10) || 0);
+    const search = typeof extra.search === "string" ? extra.search.trim() : "";
+    const discover = typeof extra.discover === "string" ? extra.discover.trim() : "";
+    const isDiscoverRequest = discover.toLowerCase() === "only";
+    const pageLimit = isDiscoverRequest ? 100 : 20;
+    const isSearchCatalog = normalizedCatalogId === "kitsu.series.search" ||
+        normalizedCatalogId === "kitsu.movie.search" ||
+        normalizedCatalogId === "kitsu.series.ova_search" ||
+        normalizedCatalogId === "kitsu.series.ona_search" ||
+        normalizedCatalogId === "kitsu.series.special_search";
+    const isLatestCatalog = normalizedCatalogId === "kitsu.series.latest" ||
+        normalizedCatalogId === "kitsu.movie.latest" ||
+        normalizedCatalogId === "kitsu.series.ova_latest" ||
+        normalizedCatalogId === "kitsu.series.ona_latest" ||
+        normalizedCatalogId === "kitsu.series.special_latest";
+    const resolvedConfig = getRequestConfig(config);
+    const params = new URLSearchParams();
+    params.set("page[limit]", String(pageLimit));
+    params.set("page[offset]", String(skip));
+
+    let forcedType = requestedType;
+    let allowedSubtypes = [];
+    let excludeFutureStartDates = false;
+
+    switch (normalizedCatalogId) {
+        case "kitsu.series.popular":
+            params.set("sort", "-userCount");
+            params.set("filter[subtype]", "TV");
+            forcedType = "series";
+            allowedSubtypes = ["tv"];
+            break;
+        case "kitsu.series.latest":
+            params.set("sort", "-startDate");
+            params.set("filter[subtype]", "TV");
+            forcedType = "series";
+            allowedSubtypes = ["tv"];
+            excludeFutureStartDates = true;
+            break;
+        case "kitsu.movie.popular":
+            params.set("sort", "-userCount");
+            params.set("filter[subtype]", "movie");
+            forcedType = "movie";
+            allowedSubtypes = ["movie"];
+            break;
+        case "kitsu.movie.latest":
+            params.set("sort", "-startDate");
+            params.set("filter[subtype]", "movie");
+            forcedType = "movie";
+            allowedSubtypes = ["movie"];
+            excludeFutureStartDates = true;
+            break;
+        case "kitsu.series.ova":
+            params.set("sort", "-userCount");
+            params.set("filter[subtype]", "OVA");
+            forcedType = "series";
+            allowedSubtypes = ["ova"];
+            break;
+        case "kitsu.series.ova_latest":
+            params.set("sort", "-startDate");
+            params.set("filter[subtype]", "OVA");
+            forcedType = "series";
+            allowedSubtypes = ["ova"];
+            excludeFutureStartDates = true;
+            break;
+        case "kitsu.series.ona":
+            params.set("sort", "-userCount");
+            params.set("filter[subtype]", "ONA");
+            forcedType = "series";
+            allowedSubtypes = ["ona"];
+            break;
+        case "kitsu.series.ona_latest":
+            params.set("sort", "-startDate");
+            params.set("filter[subtype]", "ONA");
+            forcedType = "series";
+            allowedSubtypes = ["ona"];
+            excludeFutureStartDates = true;
+            break;
+        case "kitsu.series.special":
+            params.set("sort", "-userCount");
+            params.set("filter[subtype]", "special");
+            forcedType = "series";
+            allowedSubtypes = ["special"];
+            break;
+        case "kitsu.series.special_latest":
+            params.set("sort", "-startDate");
+            params.set("filter[subtype]", "special");
+            forcedType = "series";
+            allowedSubtypes = ["special"];
+            excludeFutureStartDates = true;
+            break;
+        case "kitsu.series.search":
+            if (!search) return [];
+            params.set("filter[text]", search);
+            params.set("filter[subtype]", "TV");
+            forcedType = "series";
+            allowedSubtypes = ["tv"];
+            break;
+        case "kitsu.movie.search":
+            if (!search) return [];
+            params.set("filter[text]", search);
+            params.set("filter[subtype]", "movie");
+            forcedType = "movie";
+            allowedSubtypes = ["movie"];
+            break;
+        case "kitsu.series.ova_search":
+            if (!search) return [];
+            params.set("filter[text]", search);
+            params.set("filter[subtype]", "OVA");
+            forcedType = "series";
+            allowedSubtypes = ["ova"];
+            break;
+        case "kitsu.series.ona_search":
+            if (!search) return [];
+            params.set("filter[text]", search);
+            params.set("filter[subtype]", "ONA");
+            forcedType = "series";
+            allowedSubtypes = ["ona"];
+            break;
+        case "kitsu.series.special_search":
+            if (!search) return [];
+            params.set("filter[text]", search);
+            params.set("filter[subtype]", "special");
+            forcedType = "series";
+            allowedSubtypes = ["special"];
+            break;
+        default:
+            return [];
+    }
+
+    const cacheKey = `kitsu:catalog:v18:${normalizedCatalogId}:${JSON.stringify({
+        skip,
+        search,
+        discover,
+        allowedSubtypes: allowedSubtypes.join(","),
+        excludeFutureStartDates,
+        tmdbApiKey: resolvedConfig.tmdbApiKey || "",
+        topStreamingKey: resolvedConfig.topStreamingKey || "",
+        easyRatingsToken: resolvedConfig.easyRatingsToken || ""
+    })}`;
+    const cached = await cache.get(cacheKey);
+    if (isNegativeCache(cached)) return [];
+    if (cached) return cached;
+
+    try {
+        async function fetchKitsuCatalogPage(offset) {
+            params.set("page[offset]", String(offset));
+
+            const response = await fetch(`${KITSU_BASE_URL}/anime?${params.toString()}`, {
+                headers: {
+                    Accept: "application/vnd.api+json, application/json"
+                }
+            });
+            const payload = await response.json();
+
+            if (!response.ok || payload.errors) {
+                throw new Error(`Kitsu catalog fetch failed for ${normalizedCatalogId}`);
+            }
+
+            return {
+                data: Array.isArray(payload && payload.data) ? payload.data : [],
+                hasNext: !!(payload && payload.links && payload.links.next)
+            };
+        }
+
+        let filteredData = [];
+
+        if (normalizedCatalogId === "kitsu.series.latest") {
+            async function fetchKitsuEpisodePage(offset) {
+                const episodeParams = new URLSearchParams();
+                episodeParams.set("page[limit]", String(pageLimit));
+                episodeParams.set("page[offset]", String(offset));
+                episodeParams.set("sort", "-airdate");
+                episodeParams.set("include", "media");
+
+                const response = await fetch(`${KITSU_BASE_URL}/episodes?${episodeParams.toString()}`, {
+                    headers: {
+                        Accept: "application/vnd.api+json, application/json"
+                    }
+                });
+                const payload = await response.json();
+
+                if (!response.ok || payload.errors) {
+                    throw new Error(`Kitsu latest episodes fetch failed for ${normalizedCatalogId}`);
+                }
+
+                const includedItems = Array.isArray(payload && payload.included) ? payload.included : [];
+                const includedMediaMap = new Map(
+                    includedItems.map(item => [`${item.type}:${item.id}`, item])
+                );
+
+                return {
+                    episodes: Array.isArray(payload && payload.data) ? payload.data : [],
+                    includedMediaMap,
+                    hasNext: !!(payload && payload.links && payload.links.next)
+                };
+            }
+
+            const targetCount = skip + pageLimit;
+            const maxPagesToScan = Math.min(50, Math.max(8, Math.ceil(targetCount / pageLimit) + 8));
+            const seenMediaIds = new Set();
+            const latestSeriesItems = [];
+            let offset = 0;
+            let pageIndex = 0;
+            let hasNext = true;
+
+            while (hasNext && latestSeriesItems.length < targetCount && pageIndex < maxPagesToScan) {
+                const page = await fetchKitsuEpisodePage(offset);
+
+                for (const episode of page.episodes) {
+                    const airdate = episode && episode.attributes ? episode.attributes.airdate : null;
+                    if (!isReleasedOnOrBeforeToday(airdate)) continue;
+
+                    const mediaRef = episode && episode.relationships && episode.relationships.media
+                        ? episode.relationships.media.data
+                        : null;
+                    if (!mediaRef || mediaRef.type !== "anime" || !mediaRef.id) continue;
+                    if (seenMediaIds.has(mediaRef.id)) continue;
+
+                    const mediaItem = page.includedMediaMap.get(`${mediaRef.type}:${mediaRef.id}`);
+                    const mediaSubtype = mediaItem && mediaItem.attributes && mediaItem.attributes.subtype
+                        ? String(mediaItem.attributes.subtype).trim().toLowerCase()
+                        : "";
+                    if (mediaSubtype !== "tv") continue;
+
+                    seenMediaIds.add(mediaRef.id);
+                    latestSeriesItems.push(mediaItem);
+
+                    if (latestSeriesItems.length >= targetCount) break;
+                }
+
+                hasNext = page.hasNext && page.episodes.length === pageLimit;
+                offset += pageLimit;
+                pageIndex += 1;
+            }
+
+            filteredData = latestSeriesItems.slice(skip, skip + pageLimit);
+        } else if (excludeFutureStartDates) {
+            const targetCount = skip + pageLimit;
+            const maxPagesToScan = Math.min(30, Math.max(5, Math.ceil(targetCount / pageLimit) + 5));
+            const seenIds = new Set();
+            let offset = 0;
+            let pageIndex = 0;
+            let hasNext = true;
+            const releasedItems = [];
+
+            while (hasNext && releasedItems.length < targetCount && pageIndex < maxPagesToScan) {
+                const page = await fetchKitsuCatalogPage(offset);
+                const releasedPageItems = filterKitsuCatalogItemsBySubtype(page.data, allowedSubtypes)
+                    .filter(item => isReleasedOnOrBeforeToday(item && item.attributes ? item.attributes.startDate : null));
+
+                for (const item of releasedPageItems) {
+                    const itemId = item && item.id ? String(item.id) : "";
+                    if (itemId && seenIds.has(itemId)) continue;
+                    if (itemId) seenIds.add(itemId);
+                    releasedItems.push(item);
+                }
+
+                hasNext = page.hasNext && page.data.length === pageLimit;
+                offset += pageLimit;
+                pageIndex += 1;
+            }
+
+            filteredData = releasedItems.slice(skip, skip + pageLimit);
+        } else {
+            const page = await fetchKitsuCatalogPage(skip);
+            filteredData = filterKitsuCatalogItemsBySubtype(page.data, allowedSubtypes);
+        }
+
+        const metas = (await mapWithConcurrency(
+            filteredData,
+            isDiscoverRequest ? 2 : 3,
+            item => mapKitsuCatalogItemToMeta(item, forcedType, config, { enrichCatalogMeta: true })
+        ))
+            .filter(Boolean);
+
+        const sortedMetas = (isSearchCatalog || (isLatestCatalog && normalizedCatalogId !== "kitsu.series.latest"))
+            ? sortMetasByReleaseDesc(metas)
+            : metas;
+
+        await cache.set(cacheKey, sortedMetas, withTtlJitter(KITSU_TTL_SECONDS.catalog));
+        return sortedMetas;
+    } catch (error) {
+        console.error(`[Easy Catalogs] Kitsu Catalog Error (${normalizedCatalogId}): ${error.message}`);
+        await cache.set(cacheKey, createNegativeCache("kitsu_catalog_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+        return [];
+    }
 }
 
 const MOVIE_GENRES = {
@@ -446,14 +2836,21 @@ Object.entries(SLUG_TO_PROVIDER).forEach(([slug, name]) => {
 });
 
 const manifest = {
-    id: "org.bestia.tmdb",
-    version: "1.0.19",
-    name: "Miglior Catalogo Italiano",
-    description: "Miglior Catalogo Italiano per Stremio/Nuvio",
-    resources: ["catalog", "meta"],
+    id: "org.bestia.easycatalogs",
+    version: "1.0.51",
+    name: "Easy Catalogs",
+    description: "Easy Catalogs per Stremio",
+    behaviorHints: {
+        configurable: true
+    },
+    resources: [
+        "catalog",
+        { name: "meta", types: ["movie", "series"], idPrefixes: ["tmdb", "tt", "kitsu"] },
+        { name: "stream", types: ["movie", "series"], idPrefixes: ["tmdb", "tt", "kitsu"] }
+    ],
     types: ["movie", "series"],
     catalogs: [], // Start empty, populate later to bypass 8KB limit check
-    idPrefixes: ["tmdb", "tt"]
+    idPrefixes: ["tmdb", "tt", "kitsu"]
 };
 
 // Define Full Catalogs List
@@ -538,6 +2935,16 @@ const fullCatalogs = [
         },
         {
             type: "movie",
+            id: TOP10_MOVIE_MANIFEST_ID,
+            name: "Top 10 Italia"
+        },
+        {
+            type: "series",
+            id: TOP10_SERIES_MANIFEST_ID,
+            name: "Top 10 Italia"
+        },
+        {
+            type: "movie",
             id: "tmdb.movie.year",
             name: "Per Anno",
             extra: [{ 
@@ -572,13 +2979,13 @@ const fullCatalogs = [
         {
             type: "movie",
             id: "tmdb.movie.search",
-            name: "TMDB",
+            name: "Ricerca TMDB",
             extra: [{ name: "search", isRequired: true }]
         },
         {
             type: "series",
             id: "tmdb.series.search",
-            name: "TMDB",
+            name: "Ricerca TMDB",
             extra: [{ name: "search", isRequired: true }]
         }
 ];
@@ -630,41 +3037,145 @@ Object.keys(PROVIDERS).forEach(providerName => {
             options: Object.keys(TV_GENRES) 
         }, { name: "skip", isRequired: false }]
     });
+
+    if (TOP10_PROVIDER_PAGE_SLUGS[slug]) {
+        fullCatalogs.push({
+            type: "movie",
+            id: buildTop10ManifestId("movie", slug),
+            name: `${providerName} Top 10 Italia`
+        });
+        fullCatalogs.push({
+            type: "series",
+            id: buildTop10ManifestId("series", slug),
+            name: `${providerName} Top 10 Italia`
+        });
+    }
 });
 
 // Add Anime Catalogs at the end
 fullCatalogs.push({
     type: "movie",
     id: "tmdb.movie.anime",
-    name: "Anime",
-    extra: [{ 
-        name: "genre", 
+    name: "TMDB Popolari - Film Anime",
+    extra: [{
+        name: "genre",
         isRequired: false,
-        options: Object.keys(MOVIE_GENRES) 
+        options: Object.keys(MOVIE_GENRES)
     }, { name: "skip", isRequired: false }]
 });
 fullCatalogs.push({
     type: "series",
     id: "tmdb.series.anime",
-    name: "Anime",
-    extra: [{ 
-        name: "genre", 
+    name: "TMDB Popolari - Serie Anime",
+    extra: [{
+        name: "genre",
         isRequired: false,
-        options: Object.keys(TV_GENRES) 
+        options: Object.keys(TV_GENRES)
     }, { name: "skip", isRequired: false }]
 });
-
-// Anime Search Catalogs
 fullCatalogs.push({
     type: "movie",
     id: "tmdb.movie.anime_search",
-    name: "Anime",
+    name: "TMDB Cerca - Film Anime",
     extra: [{ name: "search", isRequired: true }]
 });
 fullCatalogs.push({
     type: "series",
     id: "tmdb.series.anime_search",
-    name: "Anime",
+    name: "TMDB Cerca - Serie Anime",
+    extra: [{ name: "search", isRequired: true }]
+});
+
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.latest",
+    name: "Kitsu Ultimi Episodi - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.popular",
+    name: "Kitsu Popolari - Serie Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "movie",
+    id: "kitsu.movie.latest",
+    name: "Kitsu Ultimi Film - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "movie",
+    id: "kitsu.movie.popular",
+    name: "Kitsu Popolari - Film Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ova_latest",
+    name: "Kitsu Ultimi OVA - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ova",
+    name: "Kitsu OVA - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ona_latest",
+    name: "Kitsu Ultimi ONA - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ona",
+    name: "Kitsu ONA - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.special_latest",
+    name: "Kitsu Ultimi Special - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.special",
+    name: "Kitsu Special - Anime",
+    extra: [{ name: "skip", isRequired: false }]
+});
+
+// Anime Search Catalogs
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.search",
+    name: "Kitsu Cerca - Serie Anime",
+    extra: [{ name: "search", isRequired: true }]
+});
+fullCatalogs.push({
+    type: "movie",
+    id: "kitsu.movie.search",
+    name: "Kitsu Cerca - Film Anime",
+    extra: [{ name: "search", isRequired: true }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ova_search",
+    name: "Kitsu Cerca - OVA Anime",
+    extra: [{ name: "search", isRequired: true }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.ona_search",
+    name: "Kitsu Cerca - ONA Anime",
+    extra: [{ name: "search", isRequired: true }]
+});
+fullCatalogs.push({
+    type: "series",
+    id: "kitsu.series.special_search",
+    name: "Kitsu Cerca - Special Anime",
     extra: [{ name: "search", isRequired: true }]
 });
 
@@ -674,17 +3185,68 @@ manifest.catalogs = [ fullCatalogs[0] ];
 
 const builder = new addonBuilder(manifest);
 
+builder.defineStreamHandler(async ({ type, id }) => {
+    if (!shouldReturnStreams()) {
+        return { streams: [] };
+    }
+
+    const normalizedId = String(id || "").trim();
+    const isSupportedId = normalizedId.startsWith("kitsu:") ||
+        normalizedId.startsWith("tmdb:") ||
+        normalizedId.startsWith("tt");
+    if (!isSupportedId) {
+        return { streams: [] };
+    }
+
+    try {
+        const response = await fetch(`${EASY_STREAMS_BASE_URL}/stream/${encodeURIComponent(type)}/${encodeURIComponent(normalizedId)}.json`, {
+            headers: {
+                Accept: "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            return { streams: [] };
+        }
+
+        const payload = await response.json();
+        const streams = Array.isArray(payload && payload.streams) ? payload.streams : [];
+        return { streams };
+    } catch (error) {
+        console.error(`[Easy Catalogs] Stream Bridge Error: ${error.message}`);
+        return { streams: [] };
+    }
+});
+
 // Metadata Handler
 builder.defineMetaHandler(async ({ type, id }) => {
-    console.log(`[TMDB Addon] Meta Request: type=${type} id=${id}`);
+    console.log(`[Easy Catalogs] Meta Request: type=${type} id=${id}`);
     
-    const store = storage.getStore();
-    const configHash = store && store.config ? JSON.stringify(store.config) : "default";
-    const cacheKey = `meta_v3:${type}:${id}:${configHash}`;
+    const config = getRequestConfig();
+    const configHash = Object.keys(config).length > 0 ? JSON.stringify(config) : "default";
+    const cacheKey = `meta_v14:${type}:${id}:${configHash}`;
+    const metaTtl = type === "movie" ? CACHE_TTL_SECONDS.metaMovie : CACHE_TTL_SECONDS.metaSeries;
     
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return { meta: {} };
     if (cached) return { meta: cached };
+
+    if (id.startsWith("kitsu:")) {
+        try {
+            const meta = await buildMetaForKitsuId(type, id, config);
+            if (meta) {
+                await cache.set(cacheKey, meta, withTtlJitter(metaTtl));
+                return { meta };
+            }
+
+            await cache.set(cacheKey, createNegativeCache("kitsu_meta_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
+            return { meta: {} };
+        } catch (e) {
+            console.error(`[Easy Catalogs] Kitsu Meta Error: ${e.message}`);
+            await cache.set(cacheKey, createNegativeCache("kitsu_meta_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
+            return { meta: {} };
+        }
+    }
     
     let tmdbId = id;
     // If it's an IMDB ID (tt...), we need to find the TMDB ID first, or use find logic if supported.
@@ -692,15 +3254,15 @@ builder.defineMetaHandler(async ({ type, id }) => {
     
     let url = "";
     if (id.startsWith("tt")) {
-        url = `${BASE_URL}/find/${id}?api_key=${getTmdbApiKey()}&external_source=imdb_id`;
+        url = `${BASE_URL}/find/${id}?api_key=${getTmdbApiKey(config)}&external_source=imdb_id`;
     } else if (id.startsWith("tmdb:")) {
         tmdbId = id.split(":")[1];
-        url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${tmdbId}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+        url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${tmdbId}?api_key=${getTmdbApiKey(config)}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
     } else {
         // Assume it is a raw TMDB ID if it's just numbers, though Stremio usually prefixes.
         // But if it comes from our catalog, it might be prefixed.
         // Let's assume standard TMDB ID for safety if numeric.
-         url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
+         url = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${id}?api_key=${getTmdbApiKey(config)}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
     }
 
     try {
@@ -714,18 +3276,16 @@ builder.defineMetaHandler(async ({ type, id }) => {
              const results = type === "series" ? data.tv_results : data.movie_results;
              if (results && results.length > 0) {
                  const item = results[0];
-                // Now fetch full details
-                const detailsUrl = `${BASE_URL}/${type === "series" ? "tv" : "movie"}/${item.id}?api_key=${getTmdbApiKey()}&language=it-IT&append_to_response=credits,similar,videos,images,external_ids,release_dates&include_image_language=it,en,null&include_video_language=it,en,null`;
-                const detailsRes = await fetch(detailsUrl);
-                const details = await detailsRes.json();
-                 meta = await transformToMeta(details, type);
+                const details = await fetchTmdbDetails(type === "series" ? "tv" : "movie", item.id, config);
+                if (details) {
+                    meta = await transformToMeta(details, type, config);
+                }
              }
         } else {
-            meta = await transformToMeta(data, type);
+            meta = await transformToMeta(data, type, config);
         }
 
         if (meta) {
-            const metaTtl = type === "movie" ? CACHE_TTL_SECONDS.metaMovie : CACHE_TTL_SECONDS.metaSeries;
             await cache.set(cacheKey, meta, withTtlJitter(metaTtl));
             return { meta };
         } else {
@@ -734,15 +3294,18 @@ builder.defineMetaHandler(async ({ type, id }) => {
         }
 
     } catch (e) {
-        console.error(`[TMDB Addon] Meta Error: ${e.message}`);
+        console.error(`[Easy Catalogs] Meta Error: ${e.message}`);
         await cache.set(cacheKey, createNegativeCache("meta_fetch_failed"), NEGATIVE_CACHE_TTL_SECONDS);
         return { meta: {} };
     }
 });
 
-async function transformToMeta(item, type) {
+async function transformToMeta(item, type, config = null, options = {}) {
     const isMovie = type === "movie";
     const year = item.release_date ? item.release_date.split("-")[0] : (item.first_air_date ? item.first_air_date.split("-")[0] : "");
+    const resolvedConfig = getRequestConfig(config);
+    const manifestUrl = getManifestUrl(resolvedConfig);
+    const includeVideos = options.includeVideos !== false;
     
     // Improved logic for exact release date (Italy)
     let exactReleaseDate = item.release_date || item.first_air_date;
@@ -783,9 +3346,6 @@ async function transformToMeta(item, type) {
         }
     }
     
-    const store = storage.getStore();
-    const config = store ? store.config : {};
-
     let trailers = [];
     let trailerStreams = [];
     
@@ -842,25 +3402,24 @@ async function transformToMeta(item, type) {
     }
 
     let poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "";
-    
-    if (config.topStreamingKey) {
-        if (imdbId) {
-            const imdbStr = String(imdbId);
-            const imdbForTopStreaming = imdbStr.toLowerCase().startsWith("tt") ? imdbStr : `tt${imdbStr}`;
-            poster = `https://api.top-streaming.stream/${config.topStreamingKey}/imdb/poster-default/${imdbForTopStreaming}.jpg`;
-        } else {
-            poster = `https://api.top-streaming.stream/${config.topStreamingKey}/tmdb/poster-default/${item.id}.jpg`;
-        }
-    }
+    const configuredPosterUrl = getConfiguredAssetUrl(resolvedConfig, "poster", imdbId, item.id);
+    if (configuredPosterUrl) poster = configuredPosterUrl;
+
+    const configuredLogoUrl = getConfiguredAssetUrl(resolvedConfig, "logo", imdbId, item.id);
+    if (configuredLogoUrl) logo = configuredLogoUrl;
+
+    let background = item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : "";
+    const configuredBackdropUrl = getConfiguredAssetUrl(resolvedConfig, "backdrop", imdbId, item.id);
+    if (configuredBackdropUrl) background = configuredBackdropUrl;
 
     // Fetch Seasons and Episodes for Series
     let videos = [];
-    if (!isMovie && item.seasons) {
+    if (includeVideos && !isMovie && item.seasons) {
         try {
             const seasonPromises = item.seasons.map(season => {
                  // Skip seasons with 0 episodes if likely placeholder, but keep specials (season 0) if they have content
                  if (season.episode_count === 0) return null; 
-                 const seasonUrl = `${BASE_URL}/tv/${item.id}/season/${season.season_number}?api_key=${getTmdbApiKey()}&language=it-IT`;
+                 const seasonUrl = `${BASE_URL}/tv/${item.id}/season/${season.season_number}?api_key=${getTmdbApiKey(resolvedConfig)}&language=it-IT`;
                  return fetch(seasonUrl).then(res => res.json()).catch(e => null);
             }).filter(Boolean);
 
@@ -898,16 +3457,19 @@ async function transformToMeta(item, type) {
 
                         // Check for Cinemeta thumbnail
                         const cinemetaThumb = cinemetaEpisodes[`${ep.season_number}:${ep.episode_number}`]?.thumbnail;
+                        const episodeMediaId = `${getPrimaryMediaId(imdbId, item.id)}:${ep.season_number}:${ep.episode_number}`;
+                        const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId);
 
                         const episodeNumber = shouldRenumber ? (index + 1) : ep.episode_number;
+                        const fallbackThumbnail = ep.still_path 
+                            ? `https://image.tmdb.org/t/p/w500${ep.still_path}` 
+                            : (cinemetaThumb || (item.backdrop_path ? `https://image.tmdb.org/t/p/w500${item.backdrop_path}` : null));
 
                         videos.push({
                             id: `${idPrefix}:${ep.season_number}:${episodeNumber}`,
                             title: ep.name,
                             released: released,
-                            thumbnail: ep.still_path 
-                                ? `https://image.tmdb.org/t/p/w500${ep.still_path}` 
-                                : (cinemetaThumb || (item.backdrop_path ? `https://image.tmdb.org/t/p/w500${item.backdrop_path}` : null)),
+                            thumbnail: configuredThumbnailUrl || fallbackThumbnail,
                             overview: ep.overview,
                             season: ep.season_number,
                             episode: episodeNumber,
@@ -922,7 +3484,7 @@ async function transformToMeta(item, type) {
                 return a.episode - b.episode;
             });
         } catch (e) {
-            console.error(`[TMDB Addon] Error fetching episodes for ${item.id}:`, e);
+            console.error(`[Easy Catalogs] Error fetching episodes for ${item.id}:`, e);
         }
     }
 
@@ -931,7 +3493,7 @@ async function transformToMeta(item, type) {
         type: type,
         name: item.title || item.name,
         poster: poster,
-        background: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : "",
+        background: background,
         logo: logo,
         description: item.overview,
         releaseInfo: releaseInfo,
@@ -963,7 +3525,7 @@ async function transformToMeta(item, type) {
             ...(item.genres ? item.genres.map(g => ({
                 name: g.name,
                 category: "Genres",
-                url: `stremio:///discover/${encodeURIComponent(ADDON_URL + "/manifest.json")}/${type}/tmdb.${type === "movie" ? "movie" : "series"}.popular?genre=${encodeURIComponent(g.name)}`
+                url: `stremio:///discover/${encodeURIComponent(manifestUrl)}/${type}/tmdb.${type === "movie" ? "movie" : "series"}.popular?genre=${encodeURIComponent(g.name)}`
             })) : []),
             // Production Companies
             ...(item.production_companies ? item.production_companies.slice(0, 3).map(c => ({
@@ -1015,26 +3577,39 @@ async function transformToMeta(item, type) {
 // The builder freezes the manifest, but let's check if we can modify the array content later via interface
 
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    console.log(`[TMDB Addon] Request: type=${type} id=${id} extra=${JSON.stringify(extra)}`);
+    console.log(`[Easy Catalogs] Request: type=${type} id=${id} extra=${JSON.stringify(extra)}`);
     
     // Convert Stremio type to TMDB type
     const tmdbType = type === "series" ? "tv" : "movie";
     const allowFuture = id.includes("upcoming");
+    const config = getRequestConfig();
+    const resolvedExtra = extra || {};
     
     try {
+        if (isKitsuCatalogId(id)) {
+            const metas = await fetchKitsuCatalogMetas(id, type, resolvedExtra, config);
+            return { metas };
+        }
+
+        if (isTop10CatalogId(id)) {
+            const metas = await fetchTop10CatalogMetas(id, type, resolvedExtra, config);
+            return { metas };
+        }
+
         let endpoint = null;
-        let queryParams = `api_key=${getTmdbApiKey()}&language=it-IT`;
+        let queryParams = `api_key=${getTmdbApiKey(config)}&language=it-IT`;
 
         // Handle Search
-        if (extra.search) {
-            const query = extra.search;
+        if (resolvedExtra.search) {
+            const query = resolvedExtra.search;
             const searchResults = new Map(); // Use Map to deduplicate by ID
             const today = new Date().toISOString().split('T')[0];
             const isAnimeSearch = id.includes("anime_search");
+            const preferKitsuId = usesKitsuAnimeIds(id);
 
             try {
                 // 1. Search Content (Movie/TV)
-                const contentRes = await fetch(`${BASE_URL}/search/${tmdbType}?api_key=${getTmdbApiKey()}&query=${encodeURIComponent(query)}&language=it-IT`);
+                const contentRes = await fetch(`${BASE_URL}/search/${tmdbType}?api_key=${getTmdbApiKey(config)}&query=${encodeURIComponent(query)}&language=it-IT`);
                 const contentData = await contentRes.json();
                 if (contentData.results) {
                     contentData.results.forEach(item => {
@@ -1058,13 +3633,13 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
                 // 2. Search Person (to get their credits) - Skip for Anime Search to be strict
                 if (!isAnimeSearch) {
-                    const peopleRes = await fetch(`${BASE_URL}/search/person?api_key=${getTmdbApiKey()}&query=${encodeURIComponent(query)}`);
+                    const peopleRes = await fetch(`${BASE_URL}/search/person?api_key=${getTmdbApiKey(config)}&query=${encodeURIComponent(query)}`);
                     const peopleData = await peopleRes.json();
                     if (peopleData.results && peopleData.results.length > 0) {
                         // Take top person
                         const person = peopleData.results[0];
                         // Fetch credits
-                        const creditsUrl = `${BASE_URL}/person/${person.id}/${tmdbType === "movie" ? "movie_credits" : "tv_credits"}?api_key=${getTmdbApiKey()}&language=it-IT`;
+                        const creditsUrl = `${BASE_URL}/person/${person.id}/${tmdbType === "movie" ? "movie_credits" : "tv_credits"}?api_key=${getTmdbApiKey(config)}&language=it-IT`;
                         const creditsRes = await fetch(creditsUrl);
                         const creditsData = await creditsRes.json();
                         const castCredits = creditsData.cast || [];
@@ -1086,12 +3661,15 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 }
 
                 const results = Array.from(searchResults.values());
-                const metas = await enrichAndMapItems(results, type, tmdbType, false, true, null);
-                console.log(`[TMDB Addon] Search debug: query="${query}" type=${type} catalog=${id} results=${results.length} metas=${metas.length}`);
-                return { metas };
+                const metas = await enrichAndMapItems(results, type, tmdbType, config, false, true, null, preferKitsuId);
+                const orderedMetas = isAnimeSearch
+                    ? sortMetasByReleaseDesc(metas)
+                    : metas;
+                console.log(`[Easy Catalogs] Search debug: query="${query}" type=${type} catalog=${id} results=${results.length} metas=${metas.length}`);
+                return { metas: orderedMetas };
 
             } catch (e) {
-                console.error(`[TMDB Addon] Search Error: ${e.message}`);
+                console.error(`[Easy Catalogs] Search Error: ${e.message}`);
                 return { metas: [] };
             }
         }
@@ -1208,19 +3786,19 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 
                 // If it's explicitly a Catalog request OR no company ID exists (fallback), use watch_providers
                 if (isCatalogOnly || !companyId) {
-                     queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
+                     queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=primary_release_date.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
                 } else {
                     // It's an "Originals" request and Company ID exists
-                    queryParams += `&with_companies=${companyId}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
+                    queryParams += `&with_companies=${companyId}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=primary_release_date.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
                 }
             } else {
                 endpoint = "discover/tv";
                 const networkId = NETWORK_IDS[providerFromId];
                 
                 if (isCatalogOnly || !networkId) {
-                     queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
+                     queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=first_air_date.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
                 } else {
-                     queryParams += `&with_networks=${networkId}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
+                     queryParams += `&with_networks=${networkId}&with_watch_providers=${providerId}&watch_region=${region}&sort_by=first_air_date.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
                 }
             }
             
@@ -1243,7 +3821,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         else if (extra && extra.genre) {
             const genre = extra.genre;
             
-            // Check if it's a provider slug first (e.g. from Nuvio context, though standard Stremio passes genre string)
+            // Check if it's a provider slug first (e.g. from a legacy context, though standard Stremio passes genre string)
             // Or check if it matches our provider list
             let providerId = PROVIDERS[genre];
             
@@ -1255,17 +3833,17 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     endpoint = "discover/movie";
                     const companyId = COMPANY_IDS[genre];
                     if (companyId) {
-                        queryParams += `&with_companies=${companyId}&sort_by=popularity.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
+                        queryParams += `&with_companies=${companyId}&sort_by=primary_release_date.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
                     } else {
-                        queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
+                        queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=primary_release_date.desc&primary_release_date.lte=${new Date().toISOString().split('T')[0]}`;
                     }
                 } else {
                     endpoint = "discover/tv";
                     const networkId = NETWORK_IDS[genre];
                     if (networkId) {
-                        queryParams += `&with_networks=${networkId}&sort_by=popularity.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
+                        queryParams += `&with_networks=${networkId}&sort_by=first_air_date.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
                     } else {
-                        queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=popularity.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
+                        queryParams += `&with_watch_providers=${providerId}&watch_region=${region}&sort_by=first_air_date.desc&first_air_date.lte=${new Date().toISOString().split('T')[0]}`;
                     }
                 }
             } else {
@@ -1345,7 +3923,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
         while (metas.length < 20 && maxPagesToFetch > 0) {
              const currentUrl = `${BASE_URL}/${endpoint}?${queryParams}&page=${fetchedPage}`;
-             console.log(`[TMDB Addon] Fetching Page ${fetchedPage}: ${currentUrl}`);
+             console.log(`[Easy Catalogs] Fetching Page ${fetchedPage}: ${currentUrl}`);
              
              try {
                  const response = await fetch(currentUrl);
@@ -1372,6 +3950,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 
                 if (filteredResults.length > 0) {
                     const skipRegionCheck = (id === "tmdb.movie.anime" || id === "tmdb.series.anime");
+                    const preferKitsuId = usesKitsuAnimeIds(id);
                     let seriesAvailabilityRegion = null;
                     if (tmdbType === "tv" && !id.includes("anime")) {
                         // Default strict region for all series catalogs
@@ -1381,7 +3960,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                             seriesAvailabilityRegion = "US";
                         }
                     }
-                    const newMetas = await enrichAndMapItems(filteredResults, type, tmdbType, allowFuture, skipRegionCheck, seriesAvailabilityRegion);
+                    const newMetas = await enrichAndMapItems(filteredResults, type, tmdbType, config, allowFuture, skipRegionCheck, seriesAvailabilityRegion, preferKitsuId);
                     metas = metas.concat(newMetas);
                 }
                  
@@ -1389,7 +3968,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                  maxPagesToFetch--;
                  
              } catch (e) {
-                 console.error(`[TMDB Addon] Fetch Error on page ${fetchedPage}:`, e);
+                 console.error(`[Easy Catalogs] Fetch Error on page ${fetchedPage}:`, e);
                  break;
              }
         }
@@ -1397,7 +3976,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         return { metas: metas };
 
     } catch (error) {
-        console.error("[TMDB Addon] Error:", error);
+        console.error("[Easy Catalogs] Error:", error);
         return { metas: [] };
     }
 });
@@ -1425,6 +4004,33 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'configure.html'));
 });
 
+app.get('/api/verify-erdb-token/:token', async (req, res) => {
+    const token = typeof req.params.token === 'string' ? req.params.token.trim() : '';
+    if (!token) {
+        return res.status(400).json({ error: 'Missing token' });
+    }
+
+    try {
+        const response = await fetch(`${EASY_RATINGS_BASE_URL}/verify-token/${encodeURIComponent(token)}`, {
+            headers: {
+                Accept: 'application/json'
+            }
+        });
+        const rawBody = await response.text();
+        let payload = {};
+
+        try {
+            payload = rawBody ? JSON.parse(rawBody) : {};
+        } catch (error) {
+            payload = rawBody ? { error: rawBody } : {};
+        }
+
+        res.status(response.status).json(payload);
+    } catch (error) {
+        res.status(502).json({ error: 'Verification unavailable' });
+    }
+});
+
 app.use(express.static('public'));
 
 app.use((req, res, next) => {
@@ -1433,10 +4039,9 @@ app.use((req, res, next) => {
     
     if (segments.length > 0) {
         const first = segments[0];
-        if (first !== 'manifest.json' && first !== 'configure' && first !== 'catalog' && first !== 'meta' && first !== 'stream' && first !== 'subtitles') {
+        if (first !== 'api' && first !== 'manifest.json' && first !== 'configure' && first !== 'catalog' && first !== 'meta' && first !== 'stream' && first !== 'subtitles') {
             try {
-                const configStr = Buffer.from(first, 'base64').toString('utf-8');
-                config = JSON.parse(configStr);
+                config = decodeConfigSegment(first);
                 req.url = req.url.replace(`/${first}`, '');
                 if (req.url === '') req.url = '/';
             } catch (e) {
@@ -1450,13 +4055,21 @@ app.use((req, res, next) => {
     });
 });
 
+app.get('/configure', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'configure.html'));
+});
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'configure.html'));
+});
+
 app.get('/manifest.json', (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Methods', '*');
     
-    const store = storage.getStore();
-    const config = store ? store.config : {};
+    const config = getRequestConfig();
+    const customCatalogNames = getConfiguredCatalogNames(config);
     
     let filteredCatalogs = [];
     
@@ -1483,28 +4096,58 @@ app.get('/manifest.json', (req, res) => {
                 'trending_series': 'tmdb.series.trending',
                 'top_rated_movie': 'tmdb.movie.top_rated',
                 'top_rated_series': 'tmdb.series.top_rated',
+                [TOP10_MOVIE_CONFIG_ID]: TOP10_MOVIE_MANIFEST_ID,
+                [TOP10_SERIES_CONFIG_ID]: TOP10_SERIES_MANIFEST_ID,
+                [LEGACY_TOP10_MOVIE_CONFIG_ID]: TOP10_MOVIE_MANIFEST_ID,
+                [LEGACY_TOP10_SERIES_CONFIG_ID]: TOP10_SERIES_MANIFEST_ID,
                 'kids_movie': 'tmdb.movie.kids',
                 'kids_series': 'tmdb.series.kids',
-                'anime_movie': 'tmdb.movie.anime',
-                'anime_series': 'tmdb.series.anime',
+                'anime_tmdb_series': 'tmdb.series.anime',
+                'anime_tmdb_movie': 'tmdb.movie.anime',
+                'anime_tmdb_search_series': 'tmdb.series.anime_search',
+                'anime_tmdb_search_movie': 'tmdb.movie.anime_search',
+                'anime_kitsu_popular_series': 'kitsu.series.popular',
+                'anime_kitsu_latest_series': 'kitsu.series.latest',
+                'anime_kitsu_popular_movie': 'kitsu.movie.popular',
+                'anime_kitsu_latest_movie': 'kitsu.movie.latest',
+                'anime_kitsu_ova': 'kitsu.series.ova',
+                'anime_kitsu_latest_ova': 'kitsu.series.ova_latest',
+                'anime_kitsu_ona': 'kitsu.series.ona',
+                'anime_kitsu_latest_ona': 'kitsu.series.ona_latest',
+                'anime_kitsu_special': 'kitsu.series.special',
+                'anime_kitsu_latest_special': 'kitsu.series.special_latest',
                 'year_movie': 'tmdb.movie.year',
                 'year_series': 'tmdb.series.year',
                 'search_movie': 'tmdb.movie.search',
                 'search_series': 'tmdb.series.search',
+                'anime_kitsu_search_movie': 'kitsu.movie.search',
+                'anime_kitsu_search_series': 'kitsu.series.search',
+                'anime_kitsu_search_ova': 'kitsu.series.ova_search',
+                'anime_kitsu_search_ona': 'kitsu.series.ona_search',
+                'anime_kitsu_search_special': 'kitsu.series.special_search',
+                // Backward compatibility
+                'anime_movie': 'tmdb.movie.anime',
+                'anime_series': 'tmdb.series.anime',
                 'anime_search_movie': 'tmdb.movie.anime_search',
-                'anime_search_series': 'tmdb.series.anime_search'
+                'anime_search_series': 'tmdb.series.anime_search',
+                'anime_popular_series': 'kitsu.series.popular',
+                'anime_popular_movie': 'kitsu.movie.popular',
+                'anime_ova': 'kitsu.series.ova',
+                'anime_ona': 'kitsu.series.ona',
+                'anime_special': 'kitsu.series.special'
             };
             
             if (standardMap[lookupKey]) {
                 const cat = fullCatalogs.find(c => c.id === standardMap[lookupKey]);
                 if (cat) {
+                    const resolvedCatalog = applyConfiguredCatalogName(cat, lookupKey, customCatalogNames);
                     if (isDiscoverOnly) {
                         // Clone catalog to avoid mutating global state and add required filter
-                        const catClone = { ...cat, extra: [...(cat.extra || [])] };
+                        const catClone = { ...resolvedCatalog, extra: [...(resolvedCatalog.extra || [])] };
                         catClone.extra.push({ name: "discover", isRequired: true, options: ["Only"] });
                         filteredCatalogs.push(catClone);
                     } else {
-                        filteredCatalogs.push(cat);
+                        filteredCatalogs.push(resolvedCatalog);
                     }
                 }
             } else {
@@ -1517,7 +4160,7 @@ app.get('/manifest.json', (req, res) => {
                     const lastPart = idParts[idParts.length - 1]; // e.g. "netflix" or "netflix_catalog"
                     
                     let keyFromId = lastPart;
-                    if (!lastPart.endsWith('_catalog')) {
+                    if (!lastPart.endsWith('_catalog') && !lastPart.endsWith('_top10')) {
                         keyFromId = lastPart + "_original";
                     }
                     
@@ -1525,12 +4168,13 @@ app.get('/manifest.json', (req, res) => {
                 });
                 
                 matching.forEach(m => {
+                    const resolvedCatalog = applyConfiguredCatalogName(m, lookupKey, customCatalogNames);
                     if (isDiscoverOnly) {
-                        const mClone = { ...m, extra: [...(m.extra || [])] };
+                        const mClone = { ...resolvedCatalog, extra: [...(resolvedCatalog.extra || [])] };
                         mClone.extra.push({ name: "discover", isRequired: true, options: ["Only"] });
                         filteredCatalogs.push(mClone);
                     } else {
-                        filteredCatalogs.push(m);
+                        filteredCatalogs.push(resolvedCatalog);
                     }
                 });
             }
@@ -1546,9 +4190,20 @@ app.get('/manifest.json', (req, res) => {
 
     // Deduplicate just in case
     filteredCatalogs = [...new Set(filteredCatalogs)];
+    filteredCatalogs.sort((a, b) => {
+        const top10Priority = Number(isTop10Catalog(b)) - Number(isTop10Catalog(a));
+        if (top10Priority !== 0) return top10Priority;
+
+        return Number(isSearchCatalog(a)) - Number(isSearchCatalog(b));
+    });
 
     const manifest = { ...addonInterface.manifest };
     manifest.catalogs = filteredCatalogs;
+    manifest.resources = shouldReturnStreams(config)
+        ? addonInterface.manifest.resources
+        : addonInterface.manifest.resources.filter(resource =>
+            !(resource && typeof resource === "object" && resource.name === "stream")
+        );
     res.json(manifest);
 });
 
@@ -1561,9 +4216,9 @@ app.use(addonRouter);
 try {
     addonInterface.manifest.catalogs.length = 0; // Clear it
     fullCatalogs.forEach(c => addonInterface.manifest.catalogs.push(c)); // Push full list
-    console.log("[TMDB Addon] Successfully injected full catalogs list.");
+    console.log("[Easy Catalogs] Successfully injected full catalogs list.");
 } catch (e) {
-    console.error("[TMDB Addon] Failed to inject catalogs:", e);
+    console.error("[Easy Catalogs] Failed to inject catalogs:", e);
 }
 
 app.listen(PORT, () => {

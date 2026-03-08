@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configurazione TMDB ITA</title>
+    <title>Configurazione Easy Catalogs</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+    <script src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js"></script>
     <style>
         :root {
             --bg-color: #0f0f0f;
@@ -20,6 +21,7 @@
             --border-color: #27272a;
             --success-color: #22c55e;
             --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --actions-bar-space: 72px;
         }
 
         * {
@@ -40,45 +42,159 @@
 
         /* Container & Layout */
         .container {
-            max-width: 1200px;
+            max-width: 1620px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 1.5rem 2rem calc(1.25rem + var(--actions-bar-space));
             width: 100%;
             display: flex;
             flex-direction: column;
-            gap: 2rem;
+            gap: 1.25rem;
             flex: 1;
             height: 100%; /* Take full height */
             overflow: hidden; /* Container shouldn't scroll */
         }
 
-        header {
-            text-align: center;
-            margin-bottom: 1rem;
+        .setup-nav {
+            width: min(100%, 1280px);
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+            gap: 0.6rem;
+            padding: 0.6rem;
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+            align-items: stretch;
         }
 
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
+        .setup-brand {
+            padding: 0.15rem 0.35rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 0.1rem;
+            min-width: 0;
         }
 
-        .subtitle {
+        .setup-brand-title {
+            font-size: 1.02rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            line-height: 1.1;
+            letter-spacing: -0.02em;
+        }
+
+        .setup-brand-subtitle {
+            font-size: 0.72rem;
             color: var(--text-secondary);
-            font-size: 1.1rem;
+            line-height: 1.2;
+        }
+
+        .setup-nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.6rem;
+        }
+
+        .setup-nav-btn {
+            border: 1px solid transparent;
+            border-radius: 0.85rem;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            padding: 0.7rem 0.85rem;
+            font-family: var(--font-family);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            text-align: left;
+            transition: background-color 0.2s, color 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .setup-nav-btn:hover {
+            color: var(--text-primary);
+            border-color: rgba(139, 92, 246, 0.25);
+        }
+
+        .setup-nav-btn.active {
+            background: rgba(139, 92, 246, 0.16);
+            color: var(--text-primary);
+            border-color: rgba(139, 92, 246, 0.45);
+            box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.12);
+        }
+
+        .setup-nav-index {
+            width: 1.95rem;
+            height: 1.95rem;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+            flex: 0 0 auto;
+        }
+
+        .setup-nav-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            min-width: 0;
+        }
+
+        .setup-nav-title {
+            font-size: 0.86rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        .setup-nav-subtitle {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            line-height: 1.25;
+        }
+
+        .setup-steps {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
+
+        .setup-step {
+            display: none;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .setup-step.active {
+            display: flex;
         }
 
         .main-grid {
             display: grid;
-            grid-template-columns: 320px 1fr;
+            grid-template-columns: minmax(360px, 820px) minmax(280px, 360px);
             gap: 2rem;
             align-items: start;
-            height: 100%; /* Take remaining height */
+            justify-content: center;
+            width: min(100%, 1280px);
+            margin: 0 auto;
+            flex: 1;
+            min-height: 0;
             overflow: hidden; /* Grid shouldn't scroll */
+        }
+
+        .step-shell {
+            width: min(100%, 1280px);
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            flex: 1;
+            min-height: 0;
         }
 
         @media (max-width: 900px) {
@@ -91,12 +207,7 @@
                 height: auto;
                 overflow: visible;
                 display: block;
-                padding-bottom: 120px;
-                padding: 0; /* Full width container */
-            }
-
-            header {
-                padding: 2rem 1rem 1rem 1rem;
+                padding: 0 0 calc(var(--actions-bar-space) + env(safe-area-inset-bottom)) 0; /* Full width container */
             }
 
             .main-grid {
@@ -109,6 +220,14 @@
                 align-items: stretch; /* Fix: Force children to take full width */
             }
 
+            .settings-panel {
+                order: 1;
+            }
+
+            .info-panel {
+                order: 2;
+            }
+
             /* Disable internal scrolling on mobile to use body scroll */
             .catalog-list-container {
                 height: auto;
@@ -117,11 +236,39 @@
                 width: 100%; /* Ensure full width */
             }
 
-            .list-header {
-                padding: 0 1rem 0.5rem 1rem;
+            .setup-nav {
+                grid-template-columns: 1fr;
+                margin: 0 0.75rem;
+                gap: 0.45rem;
+                padding: 0.45rem;
             }
 
-            #sortable-list {
+            .setup-nav-tabs {
+                grid-template-columns: 1fr;
+                gap: 0.45rem;
+            }
+
+            .setup-step {
+                min-height: auto;
+            }
+
+            .step-shell {
+                width: 100%;
+                padding: 0 0.5rem;
+                min-height: auto;
+            }
+
+            .catalog-nav {
+                margin: 0;
+            }
+
+            .list-header {
+                padding: 0 1rem 0.5rem 1rem;
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .sortable-list {
                 overflow-y: visible;
                 padding: 0 0.5rem; /* Small padding for mobile */
                 flex: none;
@@ -137,20 +284,39 @@
             }
 
             /* Adjust Sidebar */
-            .settings-panel {
+            .settings-panel,
+            .info-panel {
                 padding: 1rem;
-                margin: 0.5rem 0.25rem; /* Match list width */
+                margin: 0.5rem 0; /* Match list width */
+                max-height: none;
+                overflow: visible;
+            }
+
+            .info-list {
+                grid-template-columns: 1fr;
+            }
+
+            .anime-source-panel {
+                align-items: flex-start;
+                min-width: 0;
+            }
+
+            .anime-source-hint {
+                text-align: left;
+                max-width: none;
             }
         }
 
         /* Sidebar / Settings Panel */
-        .settings-panel {
+        .settings-panel,
+        .info-panel {
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 1rem;
             padding: 1.5rem;
-            /* Remove sticky for flex layout */
-            height: fit-content; 
+            height: fit-content;
+            max-height: 100%;
+            overflow-y: auto;
         }
 
         .panel-section {
@@ -175,6 +341,39 @@
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+        }
+
+        .feature-toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.9rem 1rem;
+            border-radius: 0.85rem;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.03);
+            overflow: hidden;
+        }
+
+        .feature-toggle-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 1;
+            min-width: 0;
+            cursor: pointer;
+        }
+
+        .feature-toggle-title {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .feature-toggle-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.35;
         }
 
         label {
@@ -206,6 +405,37 @@
             line-height: 1.4;
         }
 
+        .input-status {
+            display: none;
+            margin-top: 0.75rem;
+            padding: 0.75rem 0.9rem;
+            border-radius: 0.75rem;
+            font-size: 0.85rem;
+            line-height: 1.45;
+            border: 1px solid transparent;
+        }
+
+        .input-status.visible {
+            display: block;
+        }
+
+        .input-status.error {
+            background-color: rgba(239, 68, 68, 0.12);
+            border-color: rgba(239, 68, 68, 0.45);
+            color: #fca5a5;
+        }
+
+        .input-status.pending {
+            background-color: rgba(255, 255, 255, 0.04);
+            border-color: var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        input.is-invalid {
+            border-color: rgba(239, 68, 68, 0.7);
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+        }
+
         .input-hint a {
             color: var(--accent-color);
             text-decoration: none;
@@ -220,16 +450,183 @@
             display: flex;
             flex-direction: column;
             gap: 1rem;
+            width: 100%;
+            min-width: 0;
             height: 100%; /* Take full height */
             overflow: hidden; /* Container shouldn't scroll */
-            padding-bottom: 100px; /* Space for action bar */
+            padding-bottom: 0;
+        }
+
+        .info-panel {
+            max-height: none;
+            overflow: visible;
+        }
+
+        .info-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.7rem;
+        }
+
+        .info-item {
+            padding: 0.8rem 0.9rem;
+            border-radius: 0.85rem;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .info-item strong {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-size: 0.82rem;
+            color: var(--text-primary);
+        }
+
+        .info-item p {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            line-height: 1.35;
+        }
+
+        .catalog-nav {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+        }
+
+        .catalog-nav-btn {
+            border: 1px solid transparent;
+            border-radius: 0.85rem;
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            padding: 0.95rem 1rem;
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .catalog-nav-btn:hover {
+            color: var(--text-primary);
+            border-color: rgba(139, 92, 246, 0.25);
+        }
+
+        .catalog-nav-btn.active {
+            background: rgba(139, 92, 246, 0.16);
+            color: var(--text-primary);
+            border-color: rgba(139, 92, 246, 0.45);
+            box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.12);
+        }
+
+        .catalog-pages {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .catalog-page {
+            display: none;
+            flex-direction: column;
+            gap: 1rem;
+            height: 100%;
+            min-height: 0;
+        }
+
+        .catalog-page.active {
+            display: flex;
         }
 
         .list-header {
             display: flex;
             justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.25rem;
+        }
+
+        .list-title-row {
+            display: flex;
             align-items: center;
-            margin-bottom: 0.5rem;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .list-header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            align-items: center;
+            max-width: 360px;
+        }
+
+        .list-header-actions .catalog-action-btn {
+            padding: 0.55rem 0.9rem;
+            font-size: 0.8rem;
+        }
+
+        .list-title-row .list-header-actions {
+            max-width: none;
+        }
+
+        .list-title-row .catalog-action-btn {
+            padding: 0.46rem 0.68rem;
+            font-size: 0.75rem;
+        }
+
+        .anime-source-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.5rem;
+            min-width: 240px;
+        }
+
+        .anime-source-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .anime-source-toggle {
+            display: inline-flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.25rem;
+            padding: 0.25rem;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+        }
+
+        .anime-source-option {
+            border: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            padding: 0.55rem 0.95rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .anime-source-option.active {
+            background-color: var(--accent-color);
+            color: #ffffff;
+        }
+
+        .anime-source-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: right;
+            max-width: 280px;
         }
 
         .list-title {
@@ -242,31 +639,32 @@
             color: var(--text-secondary);
         }
 
-        #sortable-list {
+        .sortable-list {
             display: flex;
             flex-direction: column;
             gap: 0.75rem;
             overflow-y: auto; /* ONLY this list scrolls */
             padding-right: 0.5rem; /* Space for scrollbar */
             flex: 1; /* Take remaining space */
+            min-height: 0;
         }
 
         /* Custom Scrollbar for the list */
-        #sortable-list::-webkit-scrollbar {
+        .sortable-list::-webkit-scrollbar {
             width: 8px;
         }
 
-        #sortable-list::-webkit-scrollbar-track {
+        .sortable-list::-webkit-scrollbar-track {
             background: var(--bg-color);
             border-radius: 4px;
         }
 
-        #sortable-list::-webkit-scrollbar-thumb {
+        .sortable-list::-webkit-scrollbar-thumb {
             background: var(--border-color);
             border-radius: 4px;
         }
 
-        #sortable-list::-webkit-scrollbar-thumb:hover {
+        .sortable-list::-webkit-scrollbar-thumb:hover {
             background: #3f3f46;
         }
 
@@ -340,6 +738,91 @@
             align-items: center;
         }
 
+        .catalog-name-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .catalog-rename-row {
+            margin-top: 0.5rem;
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .catalog-rename-row.visible {
+            display: flex;
+        }
+
+        .catalog-rename-input {
+            flex: 1 1 220px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            border-radius: 0.6rem;
+            padding: 0.6rem 0.75rem;
+            font-size: 0.85rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .catalog-rename-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .catalog-rename-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+        }
+
+        .catalog-rename-actions {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .catalog-action-btn {
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+        }
+
+        .catalog-action-btn:hover {
+            color: var(--text-primary);
+            border-color: #52525b;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .catalog-action-btn.is-primary {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #ffffff;
+        }
+
+        .catalog-action-btn.is-primary:hover {
+            background: #7c3aed;
+            border-color: #7c3aed;
+            color: #ffffff;
+        }
+
+        .catalog-action-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.03);
+            border-color: var(--border-color);
+        }
+
         .catalog-type {
             font-size: 0.75rem;
             background-color: rgba(139, 92, 246, 0.1);
@@ -348,6 +831,29 @@
             border-radius: 999px;
             font-weight: 600;
             text-transform: uppercase;
+        }
+
+        .catalog-type.is-muted {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-secondary);
+        }
+
+        .catalog-note {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state {
+            border: 1px dashed rgba(255, 255, 255, 0.12);
+            border-radius: 1rem;
+            padding: 1.4rem 1.2rem;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.02);
+            line-height: 1.5;
+        }
+
+        .setup-step[data-step="selection"] .drag-handle {
+            display: none;
         }
 
         /* Controls / Toggles */
@@ -398,6 +904,16 @@
             border-radius: 24px;
         }
 
+        .feature-toggle-row .switch {
+            flex: 0 0 44px;
+            min-width: 44px;
+            overflow: hidden;
+        }
+
+        .feature-toggle-row .slider {
+            overflow: hidden;
+        }
+
         .slider:before {
             position: absolute;
             content: "";
@@ -437,24 +953,25 @@
             background-color: rgba(24, 24, 27, 0.9);
             backdrop-filter: blur(10px);
             border-top: 1px solid var(--border-color);
-            padding: 1.5rem;
+            padding: 0.8rem 1rem;
             display: flex;
             justify-content: center;
-            gap: 1rem;
+            gap: 0.75rem;
             z-index: 100;
         }
 
         .btn {
-            padding: 0.8rem 2rem;
-            border-radius: 0.75rem;
+            padding: 0.65rem 1.2rem;
+            border-radius: 0.7rem;
             font-weight: 600;
-            font-size: 1rem;
+            font-size: 0.92rem;
             cursor: pointer;
             border: none;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.4rem;
+            min-height: 42px;
         }
 
         .btn-primary {
@@ -512,12 +1029,24 @@
 
         /* Mobile Adjustments */
         @media (max-width: 600px) {
-            h1 {
-                font-size: 1.8rem;
+            .catalog-nav {
+                grid-template-columns: 1fr;
             }
 
-            .subtitle {
-                font-size: 0.95rem;
+            .catalog-nav-btn {
+                font-size: 0.85rem;
+                padding: 0.85rem 0.75rem;
+            }
+
+            .list-header {
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+
+            .list-header-actions {
+                width: 100%;
+                max-width: none;
+                justify-content: flex-start;
             }
 
             .catalog-item {
@@ -556,68 +1085,216 @@
             }
             
             .actions-bar {
-                padding: 1rem;
-                padding-bottom: max(1rem, env(safe-area-inset-bottom));
+                padding: 0.7rem 0.85rem;
+                padding-bottom: max(0.7rem, env(safe-area-inset-bottom));
             }
             
             .btn {
-                padding: 0.8rem 1rem;
-                font-size: 0.9rem;
+                padding: 0.7rem 0.9rem;
+                font-size: 0.86rem;
                 flex: 1;
                 justify-content: center;
+                min-height: 40px;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>TMDB ITA</h1>
-            <p class="subtitle">Configura il tuo catalogo italiano definitivo per Stremio</p>
-        </header>
+        <div class="setup-nav">
+            <div class="setup-brand">
+                <div class="setup-brand-title">Easy Catalogs</div>
+                <div class="setup-brand-subtitle">Configura i tuoi cataloghi italiani per Stremio</div>
+            </div>
+            <div class="setup-nav-tabs" role="tablist" aria-label="Flusso configurazione">
+                <button class="setup-nav-btn active" type="button" data-step="integrations" role="tab" aria-selected="true" aria-controls="setup-step-integrations">
+                    <span class="setup-nav-index">01</span>
+                    <span class="setup-nav-copy">
+                        <span class="setup-nav-title">Integrazioni</span>
+                        <span class="setup-nav-subtitle">Chiavi API, ERDB e opzioni generali dell'addon.</span>
+                    </span>
+                </button>
+                <button class="setup-nav-btn" type="button" data-step="selection" role="tab" aria-selected="false" aria-controls="setup-step-selection">
+                    <span class="setup-nav-index">02</span>
+                    <span class="setup-nav-copy">
+                        <span class="setup-nav-title">Seleziona Cataloghi</span>
+                        <span class="setup-nav-subtitle">Scegli quali cataloghi includere nel link configurato.</span>
+                    </span>
+                </button>
+                <button class="setup-nav-btn" type="button" data-step="ordering" role="tab" aria-selected="false" aria-controls="setup-step-ordering">
+                    <span class="setup-nav-index">03</span>
+                    <span class="setup-nav-copy">
+                        <span class="setup-nav-title">Ordinamento</span>
+                        <span class="setup-nav-subtitle">Gestisci la posizione finale dei cataloghi attivi.</span>
+                    </span>
+                </button>
+            </div>
+        </div>
 
-        <div class="main-grid">
-            <!-- Sidebar -->
-            <div class="settings-panel">
-                <div class="panel-section">
-                    <div class="section-title">Integrazioni</div>
-                    <div class="input-group">
-                        <label for="tmdbApiKey">TMDB API Key (opzionale)</label>
-                        <input type="text" id="tmdbApiKey" placeholder="Usa la tua chiave TMDB personale...">
-                        <div class="input-hint">
-                            Se impostata, l'addon usera la tua chiave TMDB per questo link configurato.
-                            <a href="https://www.themoviedb.org/settings/api" target="_blank">Crea una chiave su themoviedb.org</a>
+        <div class="setup-steps">
+            <section class="setup-step active" id="setup-step-integrations" data-step="integrations" role="tabpanel">
+                <div class="main-grid">
+                    <div class="settings-panel">
+                        <div class="panel-section">
+                            <div class="section-title">Integrazioni</div>
+                            <div class="input-group">
+                                <label for="tmdbApiKey">TMDB API Key (opzionale)</label>
+                                <input type="text" id="tmdbApiKey" placeholder="Usa la tua chiave TMDB personale...">
+                                <div class="input-hint">
+                                    Se impostata, l'addon usera la tua chiave TMDB per questo link configurato.
+                                    <a href="https://www.themoviedb.org/settings/api" target="_blank">Crea una chiave su themoviedb.org</a>
+                                </div>
+                            </div>
+                            <div class="input-group" style="margin-top: 1rem;">
+                                <label for="topStreamingKey">Top Poster API Key</label>
+                                <input type="text" id="topStreamingKey" placeholder="Incolla la tua chiave qui...">
+                                <div class="input-hint">
+                                    Necessaria per poster e thumbnail personalizzati. 
+                                    <a href="https://api.top-streaming.stream" target="_blank">Richiedi su api.top-streaming.stream</a>
+                                </div>
+                            </div>
+                            <div class="input-group" style="margin-top: 1rem;">
+                                <label for="easyRatingsToken">Easy Ratings Database Token</label>
+                                <input type="text" id="easyRatingsToken" placeholder="Incolla il tuo token ERDB qui...">
+                                <div class="input-hint">
+                                    Abilita poster, logo, backdrop e thumbnail personalizzati. Se impostato, ha priorita su Top Poster.
+                                </div>
+                                <div id="easyRatingsTokenStatus" class="input-status" aria-live="polite"></div>
+                            </div>
+                            <div class="input-group" style="margin-top: 1rem;">
+                                <div class="feature-toggle-row">
+                                    <label class="feature-toggle-copy" for="returnStreams">
+                                        <div class="feature-toggle-title">Return Streams</div>
+                                        <div class="feature-toggle-hint">Attiva o disattiva il ritorno degli stream da Easy Streams.</div>
+                                    </label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="returnStreams" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="input-group" style="margin-top: 1rem;">
-                        <label for="topStreamingKey">Top Poster API Key</label>
-                        <input type="text" id="topStreamingKey" placeholder="Incolla la tua chiave qui...">
-                        <div class="input-hint">
-                            Necessaria per poster e thumbnail personalizzati. 
-                            <a href="https://api.top-streaming.stream" target="_blank">Richiedi su api.top-streaming.stream</a>
+
+                    <div class="info-panel">
+                        <div class="section-title">Flusso Configurazione</div>
+                        <div class="info-list">
+                            <div class="info-item">
+                                <strong>1. Integrazioni</strong>
+                                <p>Imposta TMDB, Top Poster, ERDB e le opzioni globali del link configurato.</p>
+                            </div>
+                            <div class="info-item">
+                                <strong>2. Seleziona Cataloghi</strong>
+                                <p>Attiva solo i cataloghi che vuoi esporre, divisi tra Top 10, Standard e Anime.</p>
+                            </div>
+                            <div class="info-item">
+                                <strong>3. Ordinamento</strong>
+                                <p>Usa la lista completa finale per definire la posizione dei cataloghi attivi.</p>
+                            </div>
+                            <div class="info-item">
+                                <strong>Provider</strong>
+                                <p>Nei cataloghi standard puoi gestire Original, Completo o entrambe le modalita con i pulsanti rapidi.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
+            </section>
 
-                <div class="panel-section">
-                    <div class="section-title">Info Cataloghi</div>
-                    <div class="input-hint">
-                        <p style="margin-bottom: 0.5rem;"><strong style="color: var(--text-primary)">Original:</strong> Mostra solo le produzioni esclusive della piattaforma.</p>
-                        <p><strong style="color: var(--text-primary)">Completo:</strong> Mostra tutto il contenuto disponibile sulla piattaforma.</p>
+            <section class="setup-step" id="setup-step-selection" data-step="selection" role="tabpanel">
+                <div class="step-shell">
+                    <div class="catalog-list-container">
+                        <div class="catalog-nav" role="tablist" aria-label="Sezioni cataloghi">
+                            <button class="catalog-nav-btn active" type="button" data-page="top10" role="tab" aria-selected="true" aria-controls="catalog-page-top10">
+                                Cataloghi Top 10
+                            </button>
+                            <button class="catalog-nav-btn" type="button" data-page="standard" role="tab" aria-selected="false" aria-controls="catalog-page-standard">
+                                Cataloghi Standard
+                            </button>
+                            <button class="catalog-nav-btn" type="button" data-page="anime" role="tab" aria-selected="false" aria-controls="catalog-page-anime">
+                                Cataloghi Anime
+                            </button>
+                        </div>
+                        <div class="catalog-pages">
+                            <section class="catalog-page active" id="catalog-page-top10" data-page="top10" role="tabpanel">
+                                <div class="list-header">
+                                    <div>
+                                        <div class="list-title">Top 10 Italia</div>
+                                        <div class="list-subtitle">Scegli le classifiche Top 10 globali o per provider da includere nel link.</div>
+                                    </div>
+                                </div>
+                                <div id="top10-sortable-list" class="sortable-list">
+                                    <!-- Javascript will populate this -->
+                                </div>
+                            </section>
+                            <section class="catalog-page" id="catalog-page-standard" data-page="standard" role="tabpanel">
+                                <div class="list-header">
+                                    <div>
+                                        <div class="list-title-row">
+                                            <div class="list-title">Cataloghi Standard</div>
+                                            <div class="list-header-actions" aria-label="Azioni rapide cataloghi standard">
+                                                <button class="catalog-action-btn" type="button" id="standard-enable-non-search-btn">
+                                                    Attiva Tutti i Cataloghi
+                                                </button>
+                                                <button class="catalog-action-btn" type="button" id="standard-disable-non-search-btn">
+                                                    Disattiva Tutti i Cataloghi
+                                                </button>
+                                                <button class="catalog-action-btn" type="button" id="standard-set-providers-original-btn">
+                                                    Provider Original
+                                                </button>
+                                                <button class="catalog-action-btn" type="button" id="standard-set-providers-complete-btn">
+                                                    Provider Completo
+                                                </button>
+                                                <button class="catalog-action-btn" type="button" id="standard-set-providers-both-btn">
+                                                    Provider Original + Completo
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="list-subtitle">Cataloghi generali, ricerca TMDB e provider.</div>
+                                    </div>
+                                </div>
+                                <div id="standard-sortable-list" class="sortable-list">
+                                    <!-- Javascript will populate this -->
+                                </div>
+                            </section>
+                            <section class="catalog-page" id="catalog-page-anime" data-page="anime" role="tabpanel">
+                                <div class="list-header">
+                                    <div>
+                                        <div class="list-title">Cataloghi Anime</div>
+                                        <div class="list-subtitle">Scegli la fonte anime oppure mostra entrambe, poi attiva i cataloghi da portare nella lista finale.</div>
+                                    </div>
+                                    <div class="anime-source-panel">
+                                        <div class="anime-source-label">Fonte Anime</div>
+                                        <div class="anime-source-toggle" role="radiogroup" aria-label="Fonte cataloghi anime">
+                                            <button class="anime-source-option active" type="button" data-anime-source="tmdb" role="radio" aria-checked="true">TMDB</button>
+                                            <button class="anime-source-option" type="button" data-anime-source="kitsu" role="radio" aria-checked="false">Kitsu</button>
+                                            <button class="anime-source-option" type="button" data-anime-source="both" role="radio" aria-checked="false">Entrambi</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="anime-sortable-list" class="sortable-list">
+                                    <!-- Javascript will populate this -->
+                                </div>
+                            </section>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <!-- Main List -->
-            <div class="catalog-list-container">
-                <div class="list-header">
-                    <div class="list-title">Cataloghi</div>
-                    <div class="list-subtitle">Trascina per ordinare</div>
+            <section class="setup-step" id="setup-step-ordering" data-step="ordering" role="tabpanel">
+                <div class="step-shell">
+                    <div class="catalog-list-container">
+                        <div class="list-header">
+                            <div>
+                                <div class="list-title">Cataloghi Configurati</div>
+                                <div class="list-subtitle">Questa e la lista completa dei cataloghi attivi. Trascina per cambiare posizione.</div>
+                            </div>
+                        </div>
+                        <div id="selected-sortable-list" class="sortable-list">
+                            <!-- Javascript will populate this -->
+                        </div>
+                    </div>
                 </div>
-                <div id="sortable-list">
-                    <!-- Javascript will populate this -->
-                </div>
-            </div>
+            </section>
         </div>
     </div>
 
@@ -640,7 +1317,6 @@
     </div>
 
     <script>
-        // Data Configuration
         const PROVIDERS = [
             { name: "Netflix", slug: "netflix" },
             { name: "Amazon Prime Video", slug: "amazon" },
@@ -655,273 +1331,1341 @@
             { name: "Timvision", slug: "timvision" },
             { name: "Rakuten TV", slug: "rakuten" }
         ];
+        const TOP10_PROVIDER_SLUGS = {
+            netflix: "netflix",
+            amazon: "amazon-prime-video",
+            disney: "disney-plus",
+            apple: "apple-tv-plus",
+            hbo: "hbo-max",
+            paramount: "paramount-plus",
+            now: "now-tv",
+            sky: null,
+            mediaset: "mediaset-infinity",
+            timvision: "timvision"
+        };
+        const TOP10_PROVIDER_IDS = PROVIDERS
+            .filter(provider => Boolean(TOP10_PROVIDER_SLUGS[provider.slug]))
+            .map(provider => provider.slug);
+
+        function decodeBase64Literal(value) {
+            return atob(String(value || ""));
+        }
 
         const STANDARD_CATALOGS = [
-            { id: "upcoming_movie", name: "In Arrivo - Film", type: "Novità" },
-            { id: "upcoming_series", name: "In Onda - Serie TV", type: "Novità" },
-            { id: "now_playing_movie", name: "Al Cinema - Film", type: "Novità" },
+            { id: "upcoming_movie", name: "In Arrivo - Film", type: "Novita" },
+            { id: "upcoming_series", name: "In Onda - Serie TV", type: "Novita" },
+            { id: "now_playing_movie", name: "Al Cinema - Film", type: "Novita" },
             { id: "popular_movie", name: "Popolari - Film", type: "Popolari" },
             { id: "popular_series", name: "Popolari - Serie TV", type: "Popolari" },
             { id: "trending_movie", name: "Di Tendenza - Film", type: "Trending" },
             { id: "trending_series", name: "Di Tendenza - Serie TV", type: "Trending" },
-            { id: "top_rated_movie", name: "Più Votati - Film", type: "Top" },
-            { id: "top_rated_series", name: "Più Votati - Serie TV", type: "Top" },
-            { id: "kids_movie", name: "Bambini - Film", type: "Kids" },
-            { id: "kids_series", name: "Bambini - Serie TV", type: "Kids" },
+            { id: "top_rated_movie", name: "Piu Votati - Film", type: "Top" },
+            { id: "top_rated_series", name: "Piu Votati - Serie TV", type: "Top" },
             { id: "year_movie", name: "Per Anno - Film", type: "Archivio" },
             { id: "year_series", name: "Per Anno - Serie TV", type: "Archivio" },
-            { id: "anime_movie", name: "Anime - Film", type: "Anime" },
-            { id: "anime_series", name: "Anime - Serie TV", type: "Anime" },
+            { id: "kids_movie", name: "Bambini - Film", type: "Kids" },
+            { id: "kids_series", name: "Bambini - Serie TV", type: "Kids" },
             { id: "search_movie", name: "Ricerca TMDB - Film", type: "Search" },
-            { id: "search_series", name: "Ricerca TMDB - Serie TV", type: "Search" },
-            { id: "anime_search_movie", name: "Ricerca Anime - Film", type: "Search" },
-            { id: "anime_search_series", name: "Ricerca Anime - Serie TV", type: "Search" }
+            { id: "search_series", name: "Ricerca TMDB - Serie TV", type: "Search" }
+        ];
+        const TOP10_GLOBAL_CATALOG_ID = "top10_italia";
+        const TOP10_MOVIE_CONFIG_ID = "top10_italia_movie";
+        const TOP10_SERIES_CONFIG_ID = "top10_italia_series";
+        const LEGACY_TOP10_MOVIE_ID = decodeBase64Literal("anVzdHdhdGNoX3RvcDEwX21vdmll");
+        const LEGACY_TOP10_SERIES_ID = decodeBase64Literal("anVzdHdhdGNoX3RvcDEwX3Nlcmllcw==");
+        const TOP10_CATALOGS = [
+            { id: TOP10_GLOBAL_CATALOG_ID, name: "Top 10 Italia", type: "Movie & Series" }
         ];
 
-        // State Management
-        let currentSortOrder = [
-        "search_movie", "search_series",
-        "anime_search_movie", "anime_search_series",
-        "upcoming_movie", "upcoming_series", "now_playing_movie",
-        "popular_movie", "popular_series",
-        "trending_movie", "trending_series",
-        "top_rated_movie", "top_rated_series",
-        "kids_movie", "kids_series",
-        "year_movie", "year_series",
-        ...PROVIDERS.map(p => p.slug),
-        "anime_movie", "anime_series"
-    ];
+        const ANIME_CATALOGS = [
+            { id: "anime_tmdb_series", name: "TMDB - Popolari Serie Anime", type: "TMDB" },
+            { id: "anime_tmdb_movie", name: "TMDB - Popolari Film Anime", type: "TMDB" },
+            { id: "anime_tmdb_search_series", name: "TMDB - Ricerca Serie Anime", type: "TMDB Search" },
+            { id: "anime_tmdb_search_movie", name: "TMDB - Ricerca Film Anime", type: "TMDB Search" },
+            { id: "anime_kitsu_latest_series", name: "Kitsu - Ultimi Episodi Anime", type: "Kitsu Latest" },
+            { id: "anime_kitsu_popular_series", name: "Kitsu - Popolari Serie Anime", type: "Kitsu" },
+            { id: "anime_kitsu_latest_movie", name: "Kitsu - Ultimi Film Anime", type: "Movie Latest" },
+            { id: "anime_kitsu_popular_movie", name: "Kitsu - Popolari Film Anime", type: "Kitsu" },
+            { id: "anime_kitsu_latest_ova", name: "Kitsu - Ultimi OVA Anime", type: "OVA Latest" },
+            { id: "anime_kitsu_ova", name: "Kitsu - OVA Anime", type: "OVA" },
+            { id: "anime_kitsu_latest_ona", name: "Kitsu - Ultimi ONA Anime", type: "ONA Latest" },
+            { id: "anime_kitsu_ona", name: "Kitsu - ONA Anime", type: "ONA" },
+            { id: "anime_kitsu_latest_special", name: "Kitsu - Ultimi Special Anime", type: "Special Latest" },
+            { id: "anime_kitsu_special", name: "Kitsu - Special Anime", type: "Special" },
+            { id: "anime_kitsu_search_series", name: "Kitsu - Ricerca Serie Anime", type: "Kitsu Search" },
+            { id: "anime_kitsu_search_movie", name: "Kitsu - Ricerca Film Anime", type: "Kitsu Search" },
+            { id: "anime_kitsu_search_ova", name: "Kitsu - Ricerca OVA Anime", type: "OVA Search" },
+            { id: "anime_kitsu_search_ona", name: "Kitsu - Ricerca ONA Anime", type: "ONA Search" },
+            { id: "anime_kitsu_search_special", name: "Kitsu - Ricerca Special Anime", type: "Special Search" }
+        ];
+        const ANIME_SOURCES = ["tmdb", "kitsu", "both"];
+        const STANDARD_NON_SEARCH_CATALOG_IDS = STANDARD_CATALOGS
+            .filter(catalog => !catalog.id.includes("search"))
+            .map(catalog => catalog.id);
 
-        // Default Visibility
+        const ALL_CATALOGS = [...STANDARD_CATALOGS, ...TOP10_CATALOGS, ...ANIME_CATALOGS];
+        const CATALOGS_BY_ID = Object.fromEntries(ALL_CATALOGS.map(catalog => [catalog.id, catalog]));
+        const PROVIDERS_BY_SLUG = Object.fromEntries(PROVIDERS.map(provider => [provider.slug, provider]));
+        const DEFAULT_SORT_ORDERS = {
+            standard: [
+                "upcoming_movie", "upcoming_series", "now_playing_movie",
+                "popular_movie", "popular_series",
+                "trending_movie", "trending_series",
+                "top_rated_movie", "top_rated_series",
+                "year_movie", "year_series",
+                "kids_movie", "kids_series",
+                ...PROVIDERS.map(provider => provider.slug),
+                "search_movie", "search_series"
+            ],
+            top10: [
+                TOP10_GLOBAL_CATALOG_ID,
+                ...TOP10_PROVIDER_IDS
+            ],
+            anime: [
+                "anime_tmdb_series", "anime_tmdb_movie",
+                "anime_tmdb_search_series", "anime_tmdb_search_movie",
+                "anime_kitsu_latest_series", "anime_kitsu_popular_series",
+                "anime_kitsu_latest_movie", "anime_kitsu_popular_movie",
+                "anime_kitsu_latest_ova", "anime_kitsu_ova",
+                "anime_kitsu_latest_ona", "anime_kitsu_ona",
+                "anime_kitsu_latest_special", "anime_kitsu_special",
+                "anime_kitsu_search_series", "anime_kitsu_search_movie",
+                "anime_kitsu_search_ova", "anime_kitsu_search_ona", "anime_kitsu_search_special"
+            ]
+        };
+
+        let sortOrders = {
+            standard: [...DEFAULT_SORT_ORDERS.standard],
+            top10: [...DEFAULT_SORT_ORDERS.top10],
+            anime: [...DEFAULT_SORT_ORDERS.anime]
+        };
+        let selectedCatalogOrder = [];
+        let selectedAnimeSource = "tmdb";
+        let catalogCustomNames = {};
+
         let catalogVisibility = {};
         let catalogHomeVisibility = {};
+        let standardProviderVisibilityMemory = {};
 
-        STANDARD_CATALOGS.forEach(c => {
-            catalogVisibility[c.id] = true;
-            catalogHomeVisibility[c.id] = true;
-        });
-        
-        PROVIDERS.forEach(p => {
-            catalogVisibility[p.slug + '_original'] = true;
-            catalogVisibility[p.slug + '_catalog'] = false;
-            catalogHomeVisibility[p.slug] = true;
+        ALL_CATALOGS.forEach(catalog => {
+            catalogVisibility[catalog.id] = true;
+            catalogHomeVisibility[catalog.id] = true;
         });
 
-        // Icons
+        PROVIDERS.forEach(provider => {
+            catalogVisibility[`${provider.slug}_original`] = true;
+            catalogVisibility[`${provider.slug}_catalog`] = false;
+            catalogVisibility[`${provider.slug}_top10`] = false;
+            catalogHomeVisibility[provider.slug] = true;
+            standardProviderVisibilityMemory[provider.slug] = {
+                original: true,
+                catalog: false
+            };
+        });
+
         const DRAG_ICON = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>`;
+        const ERDB_VERIFY_BASE_URL = "/api/verify-erdb-token";
+        const easyRatingsTokenInput = document.getElementById("easyRatingsToken");
+        const easyRatingsTokenStatus = document.getElementById("easyRatingsTokenStatus");
+        const easyRatingsTokenValidationState = {
+            timer: null,
+            requestId: 0
+        };
 
-        function renderSortableList() {
-            const list = document.getElementById('sortable-list');
-            list.innerHTML = '';
-            
-            currentSortOrder.forEach(id => {
-                const li = document.createElement('div');
-                li.className = 'catalog-item';
-                li.dataset.id = id;
-                
-                // Check if Provider
-                const provider = PROVIDERS.find(p => p.slug === id);
-                
-                if (provider) {
-                    const isOriginal = catalogVisibility[id + '_original'];
-                    const isCatalog = catalogVisibility[id + '_catalog'];
-                    const isHome = catalogHomeVisibility[id];
-                    const isAnyActive = isOriginal || isCatalog;
-                    
-                    li.innerHTML = `
-                        <div class="drag-handle">${DRAG_ICON}</div>
-                        <div class="catalog-info">
-                            <div class="catalog-name">${provider.name}</div>
-                            <div class="catalog-meta">
-                                <span class="catalog-type">Provider</span>
-                            </div>
-                        </div>
-                        <div class="catalog-controls">
-                            <div class="toggle-group">
-                                <span class="toggle-label">Original</span>
-                                <label class="switch">
-                                    <input type="checkbox" class="vis-orig" ${isOriginal ? 'checked' : ''}>
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div class="toggle-group">
-                                <span class="toggle-label">Completo</span>
-                                <label class="switch">
-                                    <input type="checkbox" class="vis-cat" ${isCatalog ? 'checked' : ''}>
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div style="width: 1px; height: 30px; background: var(--border-color); margin: 0 0.5rem;"></div>
-                            <div class="toggle-group">
-                                <span class="toggle-label">Home</span>
-                                <label class="switch">
-                                    <input type="checkbox" class="home-check" ${isHome ? 'checked' : ''} ${!isAnyActive ? 'disabled' : ''}>
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    `;
-                    
-                    const visOrig = li.querySelector('.vis-orig');
-                    const visCat = li.querySelector('.vis-cat');
-                    const homeCheck = li.querySelector('.home-check');
+        function setEasyRatingsTokenStatus(state = "", message = "") {
+            easyRatingsTokenStatus.className = "input-status";
+            easyRatingsTokenStatus.textContent = "";
+            easyRatingsTokenInput.classList.remove("is-invalid");
 
-                    const updateHomeState = () => {
-                        const anyActive = visOrig.checked || visCat.checked;
-                        homeCheck.disabled = !anyActive;
-                    };
+            if (!state || !message) return;
 
-                    visOrig.addEventListener('change', (e) => {
-                        catalogVisibility[id + '_original'] = e.target.checked;
-                        updateHomeState();
-                    });
-                    visCat.addEventListener('change', (e) => {
-                        catalogVisibility[id + '_catalog'] = e.target.checked;
-                        updateHomeState();
-                    });
-                    homeCheck.addEventListener('change', (e) => {
-                        catalogHomeVisibility[id] = e.target.checked;
-                    });
+            easyRatingsTokenStatus.classList.add("visible", state);
+            easyRatingsTokenStatus.textContent = message;
 
-                } else {
-                    // Standard Catalog
-                    const cat = STANDARD_CATALOGS.find(c => c.id === id);
-                    if (cat) {
-                        const isChecked = catalogVisibility[id] !== false;
-                        const isHome = catalogHomeVisibility[id] !== false;
-                        const isSearch = id.includes('search');
-                        
-                        li.innerHTML = `
-                            <div class="drag-handle">${DRAG_ICON}</div>
-                            <div class="catalog-info">
-                                <div class="catalog-name">${cat.name}</div>
-                                <div class="catalog-meta">
-                                    <span class="catalog-type">${cat.type}</span>
-                                </div>
-                            </div>
-                            <div class="catalog-controls">
-                                <div class="toggle-group">
-                                    <span class="toggle-label">Attivo</span>
-                                    <label class="switch">
-                                        <input type="checkbox" class="vis-std" ${isChecked ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </label>
-                                </div>
-                                ${!isSearch ? `
-                                <div style="width: 1px; height: 30px; background: var(--border-color); margin: 0 0.5rem;"></div>
-                                <div class="toggle-group">
-                                    <span class="toggle-label">Home</span>
-                                    <label class="switch">
-                                        <input type="checkbox" class="home-check" ${isHome ? 'checked' : ''} ${!isChecked ? 'disabled' : ''}>
-                                        <span class="slider"></span>
-                                    </label>
-                                </div>
-                                ` : ''}
-                            </div>
-                        `;
-                        
-                        const visStd = li.querySelector('.vis-std');
-                        const homeCheck = li.querySelector('.home-check');
+            if (state === "error") {
+                easyRatingsTokenInput.classList.add("is-invalid");
+            }
+        }
 
-                        visStd.addEventListener('change', (e) => {
-                            catalogVisibility[id] = e.target.checked;
-                            if (homeCheck) homeCheck.disabled = !e.target.checked;
-                        });
-                        
-                        if (homeCheck) {
-                            homeCheck.addEventListener('change', (e) => {
-                                catalogHomeVisibility[id] = e.target.checked;
-                            });
-                        }
-                    }
+        async function verifyEasyRatingsToken(token, options = {}) {
+            const normalizedToken = typeof token === "string" ? token.trim() : "";
+            const currentRequestId = ++easyRatingsTokenValidationState.requestId;
+
+            if (!normalizedToken) {
+                setEasyRatingsTokenStatus();
+                return true;
+            }
+
+            if (!options.silent) {
+                setEasyRatingsTokenStatus("pending", "Verifica token ERDB in corso...");
+            }
+
+            try {
+                const response = await fetch(`${ERDB_VERIFY_BASE_URL}/${encodeURIComponent(normalizedToken)}`, {
+                    headers: {
+                        Accept: "application/json"
+                    },
+                    cache: "no-store"
+                });
+                const rawBody = await response.text();
+                let payload = {};
+
+                try {
+                    payload = rawBody ? JSON.parse(rawBody) : {};
+                } catch (error) {
+                    payload = rawBody ? { error: rawBody } : {};
                 }
-                
-                list.appendChild(li);
+
+                if (currentRequestId !== easyRatingsTokenValidationState.requestId) return null;
+
+                const errorMessage = payload && typeof payload.error === "string" ? payload.error : "";
+                if (
+                    response.status === 401 ||
+                    response.status === 403 ||
+                    /Invalid or expired API Key/i.test(errorMessage)
+                ) {
+                    setEasyRatingsTokenStatus("error", "Token ERDB non valido o scaduto.");
+                    return false;
+                }
+
+                setEasyRatingsTokenStatus();
+                return true;
+            } catch (error) {
+                if (currentRequestId !== easyRatingsTokenValidationState.requestId) return null;
+                setEasyRatingsTokenStatus();
+                return null;
+            }
+        }
+
+        function scheduleEasyRatingsTokenVerification(options = {}) {
+            const normalizedToken = easyRatingsTokenInput.value.trim();
+            clearTimeout(easyRatingsTokenValidationState.timer);
+
+            if (!normalizedToken) {
+                easyRatingsTokenValidationState.requestId += 1;
+                setEasyRatingsTokenStatus();
+                return;
+            }
+
+            if (options.immediate) {
+                verifyEasyRatingsToken(normalizedToken, options);
+                return;
+            }
+
+            easyRatingsTokenValidationState.timer = setTimeout(() => {
+                verifyEasyRatingsToken(normalizedToken, options);
+            }, 450);
+        }
+
+        function encodeConfigSegment(config) {
+            const json = JSON.stringify(config || {});
+            return btoa(json)
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=+$/g, "");
+        }
+
+        function decodeConfigSegment(encodedConfig) {
+            const normalizedConfig = encodedConfig.replace(/-/g, "+").replace(/_/g, "/");
+            const paddingLength = normalizedConfig.length % 4;
+            const paddedConfig = paddingLength === 0
+                ? normalizedConfig
+                : normalizedConfig + "=".repeat(4 - paddingLength);
+            return JSON.parse(atob(paddedConfig));
+        }
+
+        function decodeConfigFromPath() {
+            const reservedRoutes = new Set(["api", "configure", "manifest.json", "catalog", "meta", "stream", "subtitles"]);
+            const segments = window.location.pathname.split("/").filter(Boolean);
+            if (segments.length === 0) return {};
+
+            const encodedConfig = reservedRoutes.has(segments[0]) ? null : segments[0];
+            if (!encodedConfig) return {};
+
+            try {
+                return decodeConfigSegment(encodedConfig);
+            } catch (err) {
+                console.warn("Unable to decode config from URL path:", err);
+                return {};
+            }
+        }
+
+        function getBaseCatalogId(id) {
+            if (id.endsWith("_original")) return id.slice(0, -9);
+            if (id.endsWith("_catalog")) return id.slice(0, -8);
+            if (id.endsWith("_top10")) return id.slice(0, -6);
+            return id;
+        }
+
+        function escapeHtml(value) {
+            return String(value || "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        function normalizeLegacyCatalogId(id) {
+            const legacyMap = {
+                [TOP10_MOVIE_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+                [TOP10_SERIES_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+                [LEGACY_TOP10_MOVIE_ID]: TOP10_GLOBAL_CATALOG_ID,
+                [LEGACY_TOP10_SERIES_ID]: TOP10_GLOBAL_CATALOG_ID,
+                anime_movie: "anime_tmdb_movie",
+                anime_series: "anime_tmdb_series",
+                anime_search_movie: "anime_tmdb_search_movie",
+                anime_search_series: "anime_tmdb_search_series",
+                anime_popular_movie: "anime_kitsu_popular_movie",
+                anime_popular_series: "anime_kitsu_popular_series",
+                anime_ova: "anime_kitsu_ova",
+                anime_ona: "anime_kitsu_ona",
+                anime_special: "anime_kitsu_special"
+            };
+
+            return legacyMap[id] || id;
+        }
+
+        function getCatalogDefinition(id) {
+            return CATALOGS_BY_ID[normalizeLegacyCatalogId(id)] || null;
+        }
+
+        function getCatalogNameKey(id) {
+            return getBaseCatalogId(normalizeLegacyCatalogId(String(id || "").trim()));
+        }
+
+        function normalizeCatalogCustomNames(rawNames) {
+            if (!rawNames || typeof rawNames !== "object" || Array.isArray(rawNames)) return {};
+
+            const normalizedNames = {};
+            Object.entries(rawNames).forEach(([key, value]) => {
+                const normalizedKey = getCatalogNameKey(key);
+                const cleanValue = typeof value === "string" ? value.trim() : "";
+                if (!normalizedKey || !cleanValue) return;
+                normalizedNames[normalizedKey] = cleanValue;
+            });
+            return normalizedNames;
+        }
+
+        function getCatalogCustomName(id) {
+            const key = getCatalogNameKey(id);
+            return key ? (catalogCustomNames[key] || "") : "";
+        }
+
+        function setCatalogCustomName(id, value) {
+            const key = getCatalogNameKey(id);
+            if (!key) return "";
+
+            const cleanValue = typeof value === "string" ? value.trim() : "";
+            if (cleanValue) {
+                catalogCustomNames[key] = cleanValue;
+            } else {
+                delete catalogCustomNames[key];
+            }
+
+            return cleanValue;
+        }
+
+        function bindCatalogRenameControls(item, id, defaultName) {
+            if (!item) return;
+
+            const catalogName = item.querySelector(".catalog-name");
+            const renameToggle = item.querySelector(".catalog-rename-toggle");
+            const renameRow = item.querySelector(".catalog-rename-row");
+            const renameInput = item.querySelector(".catalog-rename-input");
+            const renameSave = item.querySelector(".catalog-rename-save");
+            const renameCancel = item.querySelector(".catalog-rename-cancel");
+            if (!catalogName || !renameToggle || !renameRow || !renameInput || !renameSave || !renameCancel) return;
+
+            const closeEditor = (options = {}) => {
+                if (options.resetValue) {
+                    renameInput.value = getCatalogCustomName(id);
+                }
+                renameRow.classList.remove("visible");
+                renameToggle.textContent = "Modifica";
+            };
+
+            const saveName = () => {
+                const updatedName = setCatalogCustomName(id, renameInput.value);
+                renameInput.value = updatedName;
+                catalogName.textContent = updatedName || defaultName;
+                closeEditor();
+            };
+
+            renameToggle.addEventListener("click", () => {
+                const isVisible = renameRow.classList.contains("visible");
+                if (isVisible) {
+                    closeEditor({ resetValue: true });
+                    return;
+                }
+
+                renameRow.classList.add("visible");
+                renameToggle.textContent = "Chiudi";
+                renameInput.focus();
+                renameInput.select();
+            });
+
+            renameSave.addEventListener("click", saveName);
+            renameCancel.addEventListener("click", () => {
+                closeEditor({ resetValue: true });
+            });
+
+            renameInput.addEventListener("keydown", event => {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    saveName();
+                } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeEditor({ resetValue: true });
+                }
             });
         }
 
-        // Initialize Sortable
-        new Sortable(document.getElementById('sortable-list'), {
-            animation: 200,
-            handle: '.drag-handle',
-            ghostClass: 'sortable-ghost',
-            dragClass: 'sortable-drag',
-            forceFallback: true,
-            fallbackClass: 'sortable-drag',
-            fallbackOnBody: true,
-            fallbackTolerance: 0,
-            delay: 0,
-            touchStartThreshold: 0,
-            onEnd: function (evt) {
-                const itemEl = evt.item;
-                const newIndex = evt.newIndex;
-                const oldIndex = evt.oldIndex;
-                const movedItem = currentSortOrder.splice(oldIndex, 1)[0];
-                currentSortOrder.splice(newIndex, 0, movedItem);
-            },
-        });
+        function getCatalogSection(id) {
+            const normalizedId = normalizeLegacyCatalogId(id);
+            if (normalizedId.startsWith("anime")) return "anime";
+            if (normalizedId === TOP10_GLOBAL_CATALOG_ID) return "top10";
+            return "standard";
+        }
+
+        function getAnimeCatalogSource(id) {
+            const normalizedId = normalizeLegacyCatalogId(id);
+            if (normalizedId.startsWith("anime_tmdb_")) return "tmdb";
+            if (normalizedId.startsWith("anime_kitsu_")) return "kitsu";
+            return null;
+        }
+
+        function getAnimeCatalogIdsForSource(source) {
+            if (source === "both") return [...sortOrders.anime];
+            return sortOrders.anime.filter(id => getAnimeCatalogSource(id) === source);
+        }
+
+        function resolveAnimeSource(config, configuredCatalogs = []) {
+            const explicitSource = config && typeof config.animeCatalogSource === "string"
+                ? config.animeCatalogSource.trim().toLowerCase()
+                : "";
+            if (ANIME_SOURCES.includes(explicitSource)) {
+                return explicitSource;
+            }
+
+            const configuredAnimeSources = [...new Set(configuredCatalogs
+                .map(entry => entry.endsWith("_d") ? entry.slice(0, -2) : entry)
+                .map(normalizeLegacyCatalogId)
+                .map(getAnimeCatalogSource)
+                .filter(Boolean))];
+
+            if (configuredAnimeSources.length > 1) {
+                return "both";
+            }
+
+            return configuredAnimeSources[0] || "tmdb";
+        }
+
+        function setAnimeSource(source, options = {}) {
+            selectedAnimeSource = ANIME_SOURCES.includes(source) ? source : "tmdb";
+
+            document.querySelectorAll("[data-anime-source]").forEach(button => {
+                const isActive = button.dataset.animeSource === selectedAnimeSource;
+                button.classList.toggle("active", isActive);
+                button.setAttribute("aria-checked", isActive ? "true" : "false");
+            });
+
+            if (options.render !== false) {
+                renderCatalogList("anime");
+            }
+        }
+
+        function reorderAnimeCatalogsForSource(source, oldIndex, newIndex) {
+            if (source === "both") {
+                const movedCatalog = sortOrders.anime.splice(oldIndex, 1)[0];
+                if (!movedCatalog) return;
+                sortOrders.anime.splice(newIndex, 0, movedCatalog);
+                return;
+            }
+
+            const sourceCatalogs = getAnimeCatalogIdsForSource(source);
+            const movedCatalog = sourceCatalogs.splice(oldIndex, 1)[0];
+            if (!movedCatalog) return;
+
+            sourceCatalogs.splice(newIndex, 0, movedCatalog);
+
+            let sourceCursor = 0;
+            sortOrders.anime = sortOrders.anime.map(id =>
+                getAnimeCatalogSource(id) === source
+                    ? sourceCatalogs[sourceCursor++]
+                    : id
+            );
+        }
+
+        function makeSelectedCatalogKey(section, id) {
+            return `${section}:${id}`;
+        }
+
+        function parseSelectedCatalogKey(key) {
+            const normalizedKey = String(key || "");
+            const separatorIndex = normalizedKey.indexOf(":");
+            if (separatorIndex === -1) {
+                return { section: "standard", id: normalizedKey };
+            }
+
+            return {
+                section: normalizedKey.slice(0, separatorIndex),
+                id: normalizedKey.slice(separatorIndex + 1)
+            };
+        }
+
+        function isSelectedCatalogEntryActive(section, id) {
+            const provider = PROVIDERS_BY_SLUG[id];
+
+            if (section === "top10") {
+                if (provider) return !!catalogVisibility[`${id}_top10`];
+                return catalogVisibility[id] !== false;
+            }
+
+            if (section === "standard") {
+                if (provider) {
+                    return !!catalogVisibility[`${id}_original`] || !!catalogVisibility[`${id}_catalog`];
+                }
+                return catalogVisibility[id] !== false;
+            }
+
+            if (section === "anime") {
+                return getAnimeCatalogIdsForSource(selectedAnimeSource).includes(id) && catalogVisibility[id] !== false;
+            }
+
+            return false;
+        }
+
+        function getSelectedCatalogKeysForCurrentState() {
+            const keys = [];
+
+            sortOrders.top10.forEach(id => {
+                if (isSelectedCatalogEntryActive("top10", id)) {
+                    keys.push(makeSelectedCatalogKey("top10", id));
+                }
+            });
+
+            sortOrders.standard.forEach(id => {
+                if (isSelectedCatalogEntryActive("standard", id)) {
+                    keys.push(makeSelectedCatalogKey("standard", id));
+                }
+            });
+
+            getAnimeCatalogIdsForSource(selectedAnimeSource).forEach(id => {
+                if (isSelectedCatalogEntryActive("anime", id)) {
+                    keys.push(makeSelectedCatalogKey("anime", id));
+                }
+            });
+
+            return keys;
+        }
+
+        function syncSelectedCatalogOrder() {
+            const currentKeys = getSelectedCatalogKeysForCurrentState();
+            const currentKeySet = new Set(currentKeys);
+
+            selectedCatalogOrder = selectedCatalogOrder.filter(key => currentKeySet.has(key));
+            currentKeys.forEach(key => {
+                if (!selectedCatalogOrder.includes(key)) {
+                    selectedCatalogOrder.push(key);
+                }
+            });
+        }
+
+        function getProviderModeLabel(slug) {
+            const isOriginal = !!catalogVisibility[`${slug}_original`];
+            const isCatalog = !!catalogVisibility[`${slug}_catalog`];
+            if (isOriginal && isCatalog) return "Original + Completo";
+            if (isOriginal) return "Original";
+            if (isCatalog) return "Completo";
+            return "";
+        }
+
+        function getSelectedCatalogEntryDetails(key) {
+            const { section, id } = parseSelectedCatalogKey(key);
+            const provider = PROVIDERS_BY_SLUG[id];
+
+            if (section === "top10") {
+                if (provider) {
+                    return {
+                        renameId: id,
+                        defaultName: `${provider.name} Top 10 Italia`,
+                        tags: ["Top 10", "Provider"],
+                        note: "Top 10 Italia"
+                    };
+                }
+
+                const catalog = getCatalogDefinition(id);
+                return {
+                    renameId: id,
+                    defaultName: catalog ? catalog.name : id,
+                    tags: ["Top 10", catalog && catalog.type ? catalog.type : "Catalogo"],
+                    note: ""
+                };
+            }
+
+            if (section === "standard") {
+                if (provider) {
+                    return {
+                        renameId: id,
+                        defaultName: provider.name,
+                        tags: ["Standard", "Provider"],
+                        note: getProviderModeLabel(id)
+                    };
+                }
+
+                const catalog = getCatalogDefinition(id);
+                return {
+                    renameId: id,
+                    defaultName: catalog ? catalog.name : id,
+                    tags: ["Standard", catalog && catalog.type ? catalog.type : "Catalogo"],
+                    note: ""
+                };
+            }
+
+            const catalog = getCatalogDefinition(id);
+            return {
+                renameId: id,
+                defaultName: catalog ? catalog.name : id,
+                tags: ["Anime", catalog && catalog.type ? catalog.type : "Catalogo"],
+                note: ""
+            };
+        }
+
+        function createSelectedCatalogItem(key) {
+            const details = getSelectedCatalogEntryDetails(key);
+            if (!details) return null;
+
+            const item = document.createElement("div");
+            item.className = "catalog-item";
+            item.dataset.key = key;
+
+            const customName = getCatalogCustomName(details.renameId);
+            const displayName = customName || details.defaultName;
+            const tagsHtml = details.tags
+                .filter(Boolean)
+                .map((tag, index) => `<span class="catalog-type${index === 1 ? " is-muted" : ""}">${escapeHtml(tag)}</span>`)
+                .join("");
+
+            item.innerHTML = `
+                <div class="drag-handle">${DRAG_ICON}</div>
+                <div class="catalog-info">
+                    <div class="catalog-name-row">
+                        <div class="catalog-name">${escapeHtml(displayName)}</div>
+                    </div>
+                    <div class="catalog-meta">
+                        ${tagsHtml}
+                        ${details.note ? `<span class="catalog-note">${escapeHtml(details.note)}</span>` : ""}
+                    </div>
+                </div>
+            `;
+            return item;
+        }
+
+        function renderSelectedCatalogList() {
+            const list = document.getElementById("selected-sortable-list");
+            if (!list) return;
+
+            list.innerHTML = "";
+
+            if (selectedCatalogOrder.length === 0) {
+                const emptyState = document.createElement("div");
+                emptyState.className = "empty-state";
+                emptyState.textContent = "Non hai ancora attivato cataloghi. Vai allo step Seleziona Cataloghi, abilita quello che ti serve e poi torna qui per ordinare la lista finale.";
+                list.appendChild(emptyState);
+                return;
+            }
+
+            selectedCatalogOrder.forEach(key => {
+                const item = createSelectedCatalogItem(key);
+                if (item) {
+                    list.appendChild(item);
+                }
+            });
+        }
+
+        function refreshSelectedCatalogList() {
+            syncSelectedCatalogOrder();
+            renderSelectedCatalogList();
+        }
+
+        function appendSelectedCatalogKeyToConfig(key, catalogs) {
+            const { section, id } = parseSelectedCatalogKey(key);
+            const provider = PROVIDERS_BY_SLUG[id];
+
+            if (section === "top10") {
+                if (provider) {
+                    if (catalogVisibility[`${id}_top10`]) {
+                        catalogs.push(id + "_top10");
+                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    }
+                    return;
+                }
+
+                if (!catalogVisibility[id]) return;
+                if (id === TOP10_GLOBAL_CATALOG_ID) {
+                    catalogs.push(TOP10_MOVIE_CONFIG_ID);
+                    if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    catalogs.push(TOP10_SERIES_CONFIG_ID);
+                    if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    return;
+                }
+
+                catalogs.push(id);
+                if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                return;
+            }
+
+            if (section === "standard") {
+                if (provider) {
+                    if (catalogVisibility[`${id}_original`]) {
+                        catalogs.push(id + "_original");
+                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    }
+                    if (catalogVisibility[`${id}_catalog`]) {
+                        catalogs.push(id + "_catalog");
+                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    }
+                    return;
+                }
+
+                if (!catalogVisibility[id]) return;
+                catalogs.push(id);
+                if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                return;
+            }
+
+            if (!getAnimeCatalogIdsForSource(selectedAnimeSource).includes(id) || !catalogVisibility[id]) return;
+            catalogs.push(id);
+            if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+        }
+
+        function getActiveStandardProviders() {
+            return PROVIDERS.filter(provider =>
+                catalogVisibility[`${provider.slug}_original`] ||
+                catalogVisibility[`${provider.slug}_catalog`]
+            );
+        }
+
+        function rememberStandardProviderVisibility(slug) {
+            const original = !!catalogVisibility[`${slug}_original`];
+            const catalog = !!catalogVisibility[`${slug}_catalog`];
+            if (!original && !catalog) return;
+
+            standardProviderVisibilityMemory[slug] = { original, catalog };
+        }
+
+        function areAllStandardNonSearchCatalogsActive() {
+            const areBaseCatalogsActive = STANDARD_NON_SEARCH_CATALOG_IDS.every(id => catalogVisibility[id] !== false);
+            const areProvidersActive = PROVIDERS.every(provider =>
+                catalogVisibility[`${provider.slug}_original`] ||
+                catalogVisibility[`${provider.slug}_catalog`]
+            );
+            return areBaseCatalogsActive && areProvidersActive;
+        }
+
+        function areAnyStandardNonSearchCatalogsActive() {
+            const hasActiveBaseCatalog = STANDARD_NON_SEARCH_CATALOG_IDS.some(id => catalogVisibility[id] !== false);
+            const hasActiveProvider = PROVIDERS.some(provider =>
+                catalogVisibility[`${provider.slug}_original`] ||
+                catalogVisibility[`${provider.slug}_catalog`]
+            );
+            return hasActiveBaseCatalog || hasActiveProvider;
+        }
+
+        function areAllActiveStandardProvidersOriginalOnly() {
+            const activeProviders = getActiveStandardProviders();
+            if (activeProviders.length === 0) return false;
+
+            return activeProviders.every(provider =>
+                !!catalogVisibility[`${provider.slug}_original`] &&
+                !catalogVisibility[`${provider.slug}_catalog`]
+            );
+        }
+
+        function areAllActiveStandardProvidersCompleteOnly() {
+            const activeProviders = getActiveStandardProviders();
+            if (activeProviders.length === 0) return false;
+
+            return activeProviders.every(provider =>
+                !catalogVisibility[`${provider.slug}_original`] &&
+                !!catalogVisibility[`${provider.slug}_catalog`]
+            );
+        }
+
+        function syncStandardQuickActions() {
+            return;
+        }
+
+        function setStandardNonSearchCatalogsActive(nextState) {
+            STANDARD_NON_SEARCH_CATALOG_IDS.forEach(id => {
+                catalogVisibility[id] = nextState;
+            });
+
+            PROVIDERS.forEach(provider => {
+                const slug = provider.slug;
+                if (nextState) {
+                    const rememberedState = standardProviderVisibilityMemory[slug];
+                    const hasRememberedState = rememberedState && (rememberedState.original || rememberedState.catalog);
+                    catalogVisibility[`${slug}_original`] = hasRememberedState ? rememberedState.original : true;
+                    catalogVisibility[`${slug}_catalog`] = hasRememberedState ? rememberedState.catalog : false;
+                    rememberStandardProviderVisibility(slug);
+                    return;
+                }
+
+                rememberStandardProviderVisibility(slug);
+                catalogVisibility[`${slug}_original`] = false;
+                catalogVisibility[`${slug}_catalog`] = false;
+            });
+
+            renderCatalogList("standard");
+        }
+
+        function setStandardProvidersMode(mode) {
+            const activeProviders = getActiveStandardProviders();
+            if (activeProviders.length === 0) return;
+
+            activeProviders.forEach(provider => {
+                const useOriginal = mode === "original" || mode === "both";
+                const useCatalog = mode === "complete" || mode === "both";
+                catalogVisibility[`${provider.slug}_original`] = useOriginal;
+                catalogVisibility[`${provider.slug}_catalog`] = useCatalog;
+                rememberStandardProviderVisibility(provider.slug);
+            });
+
+            renderCatalogList("standard");
+        }
+
+        function applyInitialConfiguration(config) {
+            const resolvedConfig = config && typeof config === "object" ? config : {};
+            catalogCustomNames = normalizeCatalogCustomNames(resolvedConfig.catalogNames);
+            setAnimeSource(resolveAnimeSource(resolvedConfig), { render: false });
+            document.getElementById("returnStreams").checked = resolvedConfig.returnStreams !== false;
+
+            if (typeof resolvedConfig.tmdbApiKey === "string") {
+                document.getElementById("tmdbApiKey").value = resolvedConfig.tmdbApiKey;
+            }
+
+            if (typeof resolvedConfig.topStreamingKey === "string") {
+                document.getElementById("topStreamingKey").value = resolvedConfig.topStreamingKey;
+            }
+
+            if (typeof resolvedConfig.easyRatingsToken === "string") {
+                document.getElementById("easyRatingsToken").value = resolvedConfig.easyRatingsToken;
+            }
+
+            if (typeof resolvedConfig.catalogs !== "string" || !resolvedConfig.catalogs.trim()) return;
+
+            ALL_CATALOGS.forEach(catalog => {
+                catalogVisibility[catalog.id] = false;
+                catalogHomeVisibility[catalog.id] = false;
+            });
+
+            PROVIDERS.forEach(provider => {
+                catalogVisibility[`${provider.slug}_original`] = false;
+                catalogVisibility[`${provider.slug}_catalog`] = false;
+                catalogVisibility[`${provider.slug}_top10`] = false;
+                catalogHomeVisibility[provider.slug] = false;
+            });
+
+            const configuredCatalogs = resolvedConfig.catalogs
+                .split(",")
+                .map(item => item.trim())
+                .filter(Boolean);
+            setAnimeSource(resolveAnimeSource(resolvedConfig, configuredCatalogs), { render: false });
+
+            const configuredOrder = { standard: [], top10: [], anime: [] };
+            const configuredSelectedOrder = [];
+
+            configuredCatalogs.forEach(entry => {
+                const isHome = !entry.endsWith("_d");
+                const rawCatalogId = isHome ? entry : entry.slice(0, -2);
+                const catalogId = normalizeLegacyCatalogId(rawCatalogId);
+                const baseId = getBaseCatalogId(catalogId);
+                const provider = PROVIDERS_BY_SLUG[baseId];
+                const catalogDefinition = getCatalogDefinition(catalogId);
+
+                if (provider) {
+                    if (catalogId === `${baseId}_original` || catalogId === `${baseId}_catalog` || catalogId === `${baseId}_top10`) {
+                        if (catalogId === `${baseId}_top10` && !TOP10_PROVIDER_IDS.includes(baseId)) {
+                            return;
+                        }
+                        catalogVisibility[catalogId] = true;
+                        catalogHomeVisibility[baseId] = isHome;
+                        const providerSection = catalogId === `${baseId}_top10` ? "top10" : "standard";
+                        if (!configuredOrder[providerSection].includes(baseId)) {
+                            configuredOrder[providerSection].push(baseId);
+                        }
+                        const providerKey = makeSelectedCatalogKey(providerSection, baseId);
+                        if (!configuredSelectedOrder.includes(providerKey)) {
+                            configuredSelectedOrder.push(providerKey);
+                        }
+                    }
+                    return;
+                }
+
+                if (!catalogDefinition) return;
+
+                catalogVisibility[catalogId] = true;
+                if (catalogId === TOP10_GLOBAL_CATALOG_ID) {
+                    catalogHomeVisibility[catalogId] = catalogHomeVisibility[catalogId] || isHome;
+                } else {
+                    catalogHomeVisibility[catalogId] = isHome;
+                }
+
+                const section = getCatalogSection(catalogId);
+                if (!configuredOrder[section].includes(baseId)) {
+                    configuredOrder[section].push(baseId);
+                }
+                const selectedKey = makeSelectedCatalogKey(section, baseId);
+                if (!configuredSelectedOrder.includes(selectedKey)) {
+                    configuredSelectedOrder.push(selectedKey);
+                }
+            });
+
+            Object.keys(sortOrders).forEach(section => {
+                sortOrders[section] = [
+                    ...configuredOrder[section],
+                    ...sortOrders[section].filter(id => !configuredOrder[section].includes(id))
+                ];
+            });
+
+            PROVIDERS.forEach(provider => {
+                rememberStandardProviderVisibility(provider.slug);
+            });
+
+            selectedCatalogOrder = configuredSelectedOrder;
+        }
+
+        function createProviderItem(provider, section = "standard") {
+            const id = provider.slug;
+            const li = document.createElement("div");
+            li.className = "catalog-item";
+            li.dataset.id = id;
+
+            const isOriginal = catalogVisibility[`${id}_original`];
+            const isCatalog = catalogVisibility[`${id}_catalog`];
+            const isTop10 = catalogVisibility[`${id}_top10`];
+            const isHome = catalogHomeVisibility[id];
+            const isTop10Section = section === "top10";
+            const isAnyActive = isTop10Section ? isTop10 : (isOriginal || isCatalog);
+            const customName = getCatalogCustomName(id);
+            const displayName = customName || provider.name;
+
+            li.innerHTML = `
+                <div class="drag-handle">${DRAG_ICON}</div>
+                <div class="catalog-info">
+                    <div class="catalog-name-row">
+                        <div class="catalog-name">${escapeHtml(displayName)}</div>
+                        <button type="button" class="catalog-action-btn catalog-rename-toggle">Modifica</button>
+                    </div>
+                    <div class="catalog-meta">
+                        <span class="catalog-type">Provider</span>
+                    </div>
+                    <div class="catalog-rename-row">
+                        <input
+                            type="text"
+                            class="catalog-rename-input"
+                            value="${escapeHtml(customName)}"
+                            placeholder="${escapeHtml(provider.name)}"
+                            aria-label="Nome personalizzato per ${escapeHtml(provider.name)}"
+                        >
+                        <div class="catalog-rename-actions">
+                            <button type="button" class="catalog-action-btn is-primary catalog-rename-save">Salva</button>
+                            <button type="button" class="catalog-action-btn catalog-rename-cancel">Annulla</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="catalog-controls">
+                    ${!isTop10Section ? `
+                    <div class="toggle-group">
+                        <span class="toggle-label">Original</span>
+                        <label class="switch">
+                            <input type="checkbox" class="vis-orig" ${isOriginal ? "checked" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    ` : ``}
+                    ${!isTop10Section ? `
+                    <div class="toggle-group">
+                        <span class="toggle-label">Completo</span>
+                        <label class="switch">
+                            <input type="checkbox" class="vis-cat" ${isCatalog ? "checked" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    ` : `
+                    <div class="toggle-group">
+                        <span class="toggle-label">Movie & Series</span>
+                        <label class="switch">
+                            <input type="checkbox" class="vis-top10" ${isTop10 ? "checked" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    `}
+                    <div style="width: 1px; height: 30px; background: var(--border-color); margin: 0 0.5rem;"></div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">Home</span>
+                        <label class="switch">
+                            <input type="checkbox" class="home-check" ${isHome ? "checked" : ""} ${!isAnyActive ? "disabled" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            `;
+
+            const visOrig = li.querySelector(".vis-orig");
+            const visCat = li.querySelector(".vis-cat");
+            const visTop10 = li.querySelector(".vis-top10");
+            const homeCheck = li.querySelector(".home-check");
+
+            const updateHomeState = () => {
+                homeCheck.disabled = isTop10Section
+                    ? !(visTop10 && visTop10.checked)
+                    : !((visOrig && visOrig.checked) || (visCat && visCat.checked));
+            };
+
+            if (visOrig) {
+                visOrig.addEventListener("change", event => {
+                    catalogVisibility[`${id}_original`] = event.target.checked;
+                    rememberStandardProviderVisibility(id);
+                    updateHomeState();
+                    if (section === "standard") syncStandardQuickActions();
+                    refreshSelectedCatalogList();
+                });
+            }
+
+            if (visCat) {
+                visCat.addEventListener("change", event => {
+                    catalogVisibility[`${id}_catalog`] = event.target.checked;
+                    rememberStandardProviderVisibility(id);
+                    updateHomeState();
+                    if (section === "standard") syncStandardQuickActions();
+                    refreshSelectedCatalogList();
+                });
+            }
+
+            if (visTop10) {
+                visTop10.addEventListener("change", event => {
+                    catalogVisibility[`${id}_top10`] = event.target.checked;
+                    updateHomeState();
+                    refreshSelectedCatalogList();
+                });
+            }
+
+            homeCheck.addEventListener("change", event => {
+                catalogHomeVisibility[id] = event.target.checked;
+            });
+
+            bindCatalogRenameControls(li, id, provider.name);
+
+            return li;
+        }
+
+        function createCatalogItem(catalog) {
+            if (!catalog) return null;
+
+            const id = catalog.id;
+            const li = document.createElement("div");
+            li.className = "catalog-item";
+            li.dataset.id = id;
+
+            const isChecked = catalogVisibility[id] !== false;
+            const isHome = catalogHomeVisibility[id] !== false;
+            const isSearch = id.includes("search");
+            const toggleLabel = id === TOP10_GLOBAL_CATALOG_ID ? "Movie & Series" : "Attivo";
+            const customName = getCatalogCustomName(id);
+            const displayName = customName || catalog.name;
+
+            li.innerHTML = `
+                <div class="drag-handle">${DRAG_ICON}</div>
+                <div class="catalog-info">
+                    <div class="catalog-name-row">
+                        <div class="catalog-name">${escapeHtml(displayName)}</div>
+                        <button type="button" class="catalog-action-btn catalog-rename-toggle">Modifica</button>
+                    </div>
+                    <div class="catalog-meta">
+                        <span class="catalog-type">${escapeHtml(catalog.type)}</span>
+                    </div>
+                    <div class="catalog-rename-row">
+                        <input
+                            type="text"
+                            class="catalog-rename-input"
+                            value="${escapeHtml(customName)}"
+                            placeholder="${escapeHtml(catalog.name)}"
+                            aria-label="Nome personalizzato per ${escapeHtml(catalog.name)}"
+                        >
+                        <div class="catalog-rename-actions">
+                            <button type="button" class="catalog-action-btn is-primary catalog-rename-save">Salva</button>
+                            <button type="button" class="catalog-action-btn catalog-rename-cancel">Annulla</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="catalog-controls">
+                    <div class="toggle-group">
+                        <span class="toggle-label">${toggleLabel}</span>
+                        <label class="switch">
+                            <input type="checkbox" class="vis-std" ${isChecked ? "checked" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    ${!isSearch ? `
+                    <div style="width: 1px; height: 30px; background: var(--border-color); margin: 0 0.5rem;"></div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">Home</span>
+                        <label class="switch">
+                            <input type="checkbox" class="home-check" ${isHome ? "checked" : ""} ${!isChecked ? "disabled" : ""}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    ` : ""}
+                </div>
+            `;
+
+            const visStd = li.querySelector(".vis-std");
+            const homeCheck = li.querySelector(".home-check");
+
+            visStd.addEventListener("change", event => {
+                catalogVisibility[id] = event.target.checked;
+                if (homeCheck) homeCheck.disabled = !event.target.checked;
+                if (getCatalogSection(id) === "standard") syncStandardQuickActions();
+                refreshSelectedCatalogList();
+            });
+
+            if (homeCheck) {
+                homeCheck.addEventListener("change", event => {
+                    catalogHomeVisibility[id] = event.target.checked;
+                });
+            }
+
+            bindCatalogRenameControls(li, id, catalog.name);
+
+            return li;
+        }
+
+        function renderCatalogList(section) {
+            const list = document.getElementById(`${section}-sortable-list`);
+            list.innerHTML = "";
+
+            const orderedIds = section === "anime"
+                ? getAnimeCatalogIdsForSource(selectedAnimeSource)
+                : sortOrders[section];
+
+            orderedIds.forEach(id => {
+                const provider = PROVIDERS_BY_SLUG[id];
+                const item = provider
+                    ? createProviderItem(provider, section)
+                    : createCatalogItem(getCatalogDefinition(id));
+
+                if (item) {
+                    list.appendChild(item);
+                }
+            });
+
+            if (section === "standard") {
+                syncStandardQuickActions();
+            }
+
+            refreshSelectedCatalogList();
+        }
+
+        function initializeSortable(section) {
+            new Sortable(document.getElementById(`${section}-sortable-list`), {
+                animation: 200,
+                handle: ".drag-handle",
+                ghostClass: "sortable-ghost",
+                dragClass: "sortable-drag",
+                forceFallback: true,
+                fallbackClass: "sortable-drag",
+                fallbackOnBody: true,
+                fallbackTolerance: 0,
+                delay: 0,
+                touchStartThreshold: 0,
+                onEnd: function(evt) {
+                    if (section === "anime") {
+                        reorderAnimeCatalogsForSource(selectedAnimeSource, evt.oldIndex, evt.newIndex);
+                        return;
+                    }
+
+                    const order = sortOrders[section];
+                    const movedItem = order.splice(evt.oldIndex, 1)[0];
+                    order.splice(evt.newIndex, 0, movedItem);
+                }
+            });
+        }
+
+        function initializeSelectedCatalogSortable() {
+            new Sortable(document.getElementById("selected-sortable-list"), {
+                animation: 200,
+                handle: ".drag-handle",
+                ghostClass: "sortable-ghost",
+                dragClass: "sortable-drag",
+                forceFallback: true,
+                fallbackClass: "sortable-drag",
+                fallbackOnBody: true,
+                fallbackTolerance: 0,
+                delay: 0,
+                touchStartThreshold: 0,
+                onEnd: function(evt) {
+                    const movedItem = selectedCatalogOrder.splice(evt.oldIndex, 1)[0];
+                    if (!movedItem) return;
+                    selectedCatalogOrder.splice(evt.newIndex, 0, movedItem);
+                    renderSelectedCatalogList();
+                }
+            });
+        }
+
+        function switchSetupStep(step) {
+            document.querySelectorAll(".setup-nav-btn").forEach(button => {
+                const isActive = button.dataset.step === step;
+                button.classList.toggle("active", isActive);
+                button.setAttribute("aria-selected", isActive ? "true" : "false");
+            });
+
+            document.querySelectorAll(".setup-step").forEach(panel => {
+                const isActive = panel.dataset.step === step;
+                panel.classList.toggle("active", isActive);
+                panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+            });
+        }
+
+        function switchCatalogPage(page) {
+            document.querySelectorAll(".catalog-nav-btn").forEach(button => {
+                const isActive = button.dataset.page === page;
+                button.classList.toggle("active", isActive);
+                button.setAttribute("aria-selected", isActive ? "true" : "false");
+            });
+
+            document.querySelectorAll(".catalog-page").forEach(panel => {
+                const isActive = panel.dataset.page === page;
+                panel.classList.toggle("active", isActive);
+                panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+            });
+        }
 
         function getConfiguration() {
             const config = {};
-            const tmdbApiKey = document.getElementById('tmdbApiKey').value.trim();
-            const key = document.getElementById('topStreamingKey').value.trim();
+            const tmdbApiKey = document.getElementById("tmdbApiKey").value.trim();
+            const topPosterKey = document.getElementById("topStreamingKey").value.trim();
+            const easyRatingsToken = document.getElementById("easyRatingsToken").value.trim();
+            const returnStreams = document.getElementById("returnStreams").checked;
+
             if (tmdbApiKey) config.tmdbApiKey = tmdbApiKey;
-            if (key) config.topStreamingKey = key;
-            
-            const catalogs = [];
-            
-            currentSortOrder.forEach(id => {
-                const provider = PROVIDERS.find(p => p.slug === id);
-                if (provider) {
-                    if (catalogVisibility[id + '_original']) {
-                        catalogs.push(id + '_original');
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += '_d';
-                    }
-                    if (catalogVisibility[id + '_catalog']) {
-                        catalogs.push(id + '_catalog');
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += '_d';
-                    }
-                } else {
-                    if (catalogVisibility[id]) {
-                        catalogs.push(id);
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += '_d';
-                    }
-                }
-            });
-            
-            if (catalogs.length > 0) {
-                config.catalogs = catalogs.join(',');
+            if (topPosterKey) config.topStreamingKey = topPosterKey;
+            if (easyRatingsToken) config.easyRatingsToken = easyRatingsToken;
+            if (!returnStreams) config.returnStreams = false;
+            config.animeCatalogSource = selectedAnimeSource;
+            if (Object.keys(catalogCustomNames).length > 0) {
+                config.catalogNames = Object.fromEntries(
+                    Object.entries(catalogCustomNames)
+                        .filter(([, value]) => typeof value === "string" && value.trim())
+                        .sort(([left], [right]) => left.localeCompare(right))
+                );
             }
-            
+
+            const catalogs = [];
+            syncSelectedCatalogOrder();
+            selectedCatalogOrder.forEach(key => {
+                appendSelectedCatalogKeyToConfig(key, catalogs);
+            });
+
+            if (catalogs.length > 0) {
+                config.catalogs = catalogs.join(",");
+            }
+
             return config;
         }
 
         function getStremioUrl() {
             const config = getConfiguration();
-            const configStr = btoa(JSON.stringify(config));
             const protocol = window.location.protocol;
             const host = window.location.host;
-            return `${protocol}//${host}/${configStr}/manifest.json`;
+            const configStr = encodeConfigSegment(config);
+            return configStr
+                ? `${protocol}//${host}/${configStr}/manifest.json`
+                : `${protocol}//${host}/manifest.json`;
         }
 
         function installAddon() {
-            const url = getStremioUrl().replace(/^https?:\/\//, 'stremio://');
+            const url = getStremioUrl().replace(/^https?:\/\//, "stremio://");
             window.location.href = url;
         }
 
         function copyUrl() {
             const url = getStremioUrl();
             navigator.clipboard.writeText(url).then(() => {
-                const toast = document.getElementById('toast');
-                toast.classList.add('success', 'show');
+                const toast = document.getElementById("toast");
+                toast.classList.add("success", "show");
                 setTimeout(() => {
-                    toast.classList.remove('show');
+                    toast.classList.remove("show");
                 }, 3000);
             });
         }
 
-        // Initial Render
-        renderSortableList();
+        document.querySelectorAll(".catalog-nav-btn").forEach(button => {
+            button.addEventListener("click", () => {
+                switchCatalogPage(button.dataset.page);
+            });
+        });
+
+        document.querySelectorAll(".setup-nav-btn").forEach(button => {
+            button.addEventListener("click", () => {
+                switchSetupStep(button.dataset.step);
+            });
+        });
+
+        document.querySelectorAll("[data-anime-source]").forEach(button => {
+            button.addEventListener("click", () => {
+                setAnimeSource(button.dataset.animeSource);
+            });
+        });
+
+        document.getElementById("standard-enable-non-search-btn").addEventListener("click", () => {
+            setStandardNonSearchCatalogsActive(true);
+        });
+
+        document.getElementById("standard-disable-non-search-btn").addEventListener("click", () => {
+            setStandardNonSearchCatalogsActive(false);
+        });
+
+        document.getElementById("standard-set-providers-original-btn").addEventListener("click", () => {
+            setStandardProvidersMode("original");
+        });
+
+        document.getElementById("standard-set-providers-complete-btn").addEventListener("click", () => {
+            setStandardProvidersMode("complete");
+        });
+
+        document.getElementById("standard-set-providers-both-btn").addEventListener("click", () => {
+            setStandardProvidersMode("both");
+        });
+
+        easyRatingsTokenInput.addEventListener("input", () => {
+            scheduleEasyRatingsTokenVerification();
+        });
+
+        easyRatingsTokenInput.addEventListener("blur", () => {
+            scheduleEasyRatingsTokenVerification({ immediate: true });
+        });
+
+        applyInitialConfiguration(decodeConfigFromPath());
+        scheduleEasyRatingsTokenVerification({ immediate: true, silent: true });
+        renderCatalogList("standard");
+        renderCatalogList("top10");
+        renderCatalogList("anime");
+        initializeSelectedCatalogSortable();
+        switchSetupStep("integrations");
+        switchCatalogPage("top10");
+
+        if (window.kofiWidgetOverlay && typeof window.kofiWidgetOverlay.draw === "function") {
+            window.kofiWidgetOverlay.draw("realbestia", {
+                type: "floating-chat",
+                "floating-chat.donateButton.text": "Support me",
+                "floating-chat.donateButton.background-color": "#00b9fe",
+                "floating-chat.donateButton.text-color": "#fff"
+            });
+        }
     </script>
 </body>
 </html>
+
