@@ -2115,7 +2115,8 @@
             catalogVisibility[`${provider.slug}_original`] = true;
             catalogVisibility[`${provider.slug}_catalog`] = false;
             catalogVisibility[`${provider.slug}_top10`] = false;
-            catalogHomeVisibility[provider.slug] = true;
+            catalogHomeVisibility[getProviderHomeKey("standard", provider.slug)] = true;
+            catalogHomeVisibility[getProviderHomeKey("top10", provider.slug)] = true;
             standardProviderVisibilityMemory[provider.slug] = {
                 original: true,
                 catalog: false
@@ -2198,6 +2199,20 @@
             if (id.endsWith("_catalog")) return id.slice(0, -8);
             if (id.endsWith("_top10")) return id.slice(0, -6);
             return id;
+        }
+
+        function getProviderHomeKey(section, slug) {
+            return section === "top10" ? `${slug}__home_top10` : `${slug}__home_standard`;
+        }
+
+        function getCatalogHomeKey(section, id) {
+            const provider = PROVIDERS_BY_SLUG[id];
+            if (provider) return getProviderHomeKey(section, id);
+            return id;
+        }
+
+        function isCatalogHomeEnabled(section, id) {
+            return catalogHomeVisibility[getCatalogHomeKey(section, id)] !== false;
         }
 
         function escapeHtml(value) {
@@ -2658,12 +2673,13 @@
         function appendSelectedCatalogKeyToConfig(key, catalogs) {
             const { section, id } = parseSelectedCatalogKey(key);
             const provider = PROVIDERS_BY_SLUG[id];
+            const isHome = isCatalogHomeEnabled(section, id);
 
             if (section === "top10") {
                 if (provider) {
                     if (catalogVisibility[`${id}_top10`]) {
                         catalogs.push(id + "_top10");
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                        if (!isHome) catalogs[catalogs.length - 1] += "_d";
                     }
                     return;
                 }
@@ -2671,14 +2687,14 @@
                 if (!catalogVisibility[id]) return;
                 if (id === TOP10_GLOBAL_CATALOG_ID) {
                     catalogs.push(TOP10_MOVIE_CONFIG_ID);
-                    if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    if (!isHome) catalogs[catalogs.length - 1] += "_d";
                     catalogs.push(TOP10_SERIES_CONFIG_ID);
-                    if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                    if (!isHome) catalogs[catalogs.length - 1] += "_d";
                     return;
                 }
 
                 catalogs.push(id);
-                if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                if (!isHome) catalogs[catalogs.length - 1] += "_d";
                 return;
             }
 
@@ -2686,24 +2702,24 @@
                 if (provider) {
                     if (catalogVisibility[`${id}_original`]) {
                         catalogs.push(id + "_original");
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                        if (!isHome) catalogs[catalogs.length - 1] += "_d";
                     }
                     if (catalogVisibility[`${id}_catalog`]) {
                         catalogs.push(id + "_catalog");
-                        if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                        if (!isHome) catalogs[catalogs.length - 1] += "_d";
                     }
                     return;
                 }
 
                 if (!catalogVisibility[id]) return;
                 catalogs.push(id);
-                if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+                if (!isHome) catalogs[catalogs.length - 1] += "_d";
                 return;
             }
 
             if (!getAnimeCatalogIdsForSource(selectedAnimeSource).includes(id) || !catalogVisibility[id]) return;
             catalogs.push(id);
-            if (!catalogHomeVisibility[id]) catalogs[catalogs.length - 1] += "_d";
+            if (!isHome) catalogs[catalogs.length - 1] += "_d";
         }
 
         function appendSelectedCatalogShapeKeyToConfig(key, catalogShapes) {
@@ -2906,7 +2922,8 @@
                 catalogVisibility[`${provider.slug}_original`] = false;
                 catalogVisibility[`${provider.slug}_catalog`] = false;
                 catalogVisibility[`${provider.slug}_top10`] = false;
-                catalogHomeVisibility[provider.slug] = false;
+                catalogHomeVisibility[getProviderHomeKey("standard", provider.slug)] = false;
+                catalogHomeVisibility[getProviderHomeKey("top10", provider.slug)] = false;
             });
 
             const configuredCatalogs = resolvedConfig.catalogs
@@ -2931,9 +2948,10 @@
                         if (catalogId === `${baseId}_top10` && !TOP10_PROVIDER_IDS.includes(baseId)) {
                             return;
                         }
-                        catalogVisibility[catalogId] = true;
-                        catalogHomeVisibility[baseId] = isHome;
                         const providerSection = catalogId === `${baseId}_top10` ? "top10" : "standard";
+                        catalogVisibility[catalogId] = true;
+                        const homeKey = getProviderHomeKey(providerSection, baseId);
+                        catalogHomeVisibility[homeKey] = catalogHomeVisibility[homeKey] || isHome;
                         if (!configuredOrder[providerSection].includes(baseId)) {
                             configuredOrder[providerSection].push(baseId);
                         }
@@ -2987,7 +3005,8 @@
             const isOriginal = catalogVisibility[`${id}_original`];
             const isCatalog = catalogVisibility[`${id}_catalog`];
             const isTop10 = catalogVisibility[`${id}_top10`];
-            const isHome = catalogHomeVisibility[id];
+            const homeKey = getProviderHomeKey(section, id);
+            const isHome = catalogHomeVisibility[homeKey] !== false;
             const isTop10Section = section === "top10";
             const isAnyActive = isTop10Section ? isTop10 : (isOriginal || isCatalog);
             const customName = getCatalogCustomName(id);
@@ -3111,7 +3130,7 @@
             }
 
             homeCheck.addEventListener("change", event => {
-                catalogHomeVisibility[id] = event.target.checked;
+                catalogHomeVisibility[homeKey] = event.target.checked;
             });
 
             bindCatalogRenameControls(li, id, provider.name);

@@ -3703,12 +3703,14 @@ const fullCatalogs = [
         {
             type: "movie",
             id: TOP10_MOVIE_MANIFEST_ID,
-            name: "Top 10 Italia"
+            name: "Top 10 Italia",
+            extra: [{ name: "skip", isRequired: false }]
         },
         {
             type: "series",
             id: TOP10_SERIES_MANIFEST_ID,
-            name: "Top 10 Italia"
+            name: "Top 10 Italia",
+            extra: [{ name: "skip", isRequired: false }]
         },
         {
             type: "movie",
@@ -3809,12 +3811,14 @@ Object.keys(PROVIDERS).forEach(providerName => {
         fullCatalogs.push({
             type: "movie",
             id: buildTop10ManifestId("movie", slug),
-            name: `${providerName} Top 10 Italia`
+            name: `${providerName} Top 10 Italia`,
+            extra: [{ name: "skip", isRequired: false }]
         });
         fullCatalogs.push({
             type: "series",
             id: buildTop10ManifestId("series", slug),
-            name: `${providerName} Top 10 Italia`
+            name: `${providerName} Top 10 Italia`,
+            extra: [{ name: "skip", isRequired: false }]
         });
     }
 });
