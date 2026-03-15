@@ -832,7 +832,8 @@ const TOP10_PROVIDER_PAGE_SLUGS = {
     timvision: "timvision",
     rai: "rai-play",
     rakuten: "rakuten-tv",
-    crunchyroll: "crunchyroll"
+    crunchyroll: "crunchyroll",
+    discoverypluseu: "discovery-plus-eu"
 };
 
 function buildTop10ManifestId(type, slug = null) {
@@ -1021,7 +1022,11 @@ const PROVIDER_NAME_ALIASES = {
     "NOW TV": "Sky Go / NOW",
     "Now TV": "Sky Go / NOW",
     "Sky": "Sky Go / NOW",
-    "Sky Go": "Sky Go / NOW"
+    "Sky Go": "Sky Go / NOW",
+    "Discovery+": "Discovery+",
+    "Discovery Plus": "Discovery+",
+    "Discovery+ (EU)": "Discovery+",
+    "Discovery+ EU": "Discovery+"
 };
 
 function normalizeProviderName(providerName) {
@@ -3859,6 +3864,7 @@ const PROVIDERS = {
     "Apple TV+": 350,
     "Paramount+": "531|2303|2304",
     "Sky Go / NOW": "29|39",
+    "Discovery+": 524,
     "Rai Play": 222,
     "Mediaset Infinity": "359|110",
     "Timvision": 109,
@@ -3887,7 +3893,8 @@ const NETWORK_IDS = {
     "Rai Play": "3463|533|236|1583", 
     "Mediaset Infinity": "537|402|1677",
     "Sky Go / NOW": 2667,
-    "Timvision": 109 // Fallback ID if exists
+    "Timvision": 109, // Fallback ID if exists
+    "Discovery+": "4353|4883|4741|5431"
 };
 
 const SLUG_TO_PROVIDER = {
@@ -3896,7 +3903,8 @@ const SLUG_TO_PROVIDER = {
     "paramount": "Paramount+", "now": "Sky Go / NOW", "sky": "Sky Go / NOW",
     "rai": "Rai Play", "mediaset": "Mediaset Infinity",
     "timvision": "Timvision", "rakuten": "Rakuten TV",
-    "crunchyroll": "Crunchyroll"
+    "crunchyroll": "Crunchyroll",
+    "discoverypluseu": "Discovery+"
 };
 
 const PROVIDER_SLUGS = {};
@@ -3905,6 +3913,9 @@ Object.entries(SLUG_TO_PROVIDER).forEach(([slug, name]) => {
         PROVIDER_SLUGS[name] = slug;
     }
 });
+
+const PROVIDERS_WITHOUT_ORIGINALS = new Set(["Crunchyroll"]);
+const PROVIDERS_SERIES_ONLY = new Set(["Discovery+"]);
 
 const manifest = {
     id: "org.bestia.easycatalogs",
@@ -4066,20 +4077,23 @@ const fullCatalogs = [
 // Add Provider Catalogs dynamically to fullCatalogs
 Object.keys(PROVIDERS).forEach(providerName => {
     const slug = PROVIDER_SLUGS[providerName] || providerName.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const allowOriginals = providerName !== "Crunchyroll";
+    const allowOriginals = !PROVIDERS_WITHOUT_ORIGINALS.has(providerName);
+    const isSeriesOnly = PROVIDERS_SERIES_ONLY.has(providerName);
     
     // 1. "Originals" Catalog (Production Company/Network)
     if (allowOriginals) {
-        fullCatalogs.push({
-            type: "movie",
-            id: `tmdb.movie.${slug}`,
-            name: `${providerName} Original`,
-            extra: [{ 
-                name: "genre", 
-                isRequired: false,
-                options: Object.keys(MOVIE_GENRES) 
-            }, { name: "skip", isRequired: false }]
-        });
+        if (!isSeriesOnly) {
+            fullCatalogs.push({
+                type: "movie",
+                id: `tmdb.movie.${slug}`,
+                name: `${providerName} Original`,
+                extra: [{ 
+                    name: "genre", 
+                    isRequired: false,
+                    options: Object.keys(MOVIE_GENRES) 
+                }, { name: "skip", isRequired: false }]
+            });
+        }
         fullCatalogs.push({
             type: "series",
             id: `tmdb.series.${slug}`,
@@ -4093,16 +4107,18 @@ Object.keys(PROVIDERS).forEach(providerName => {
     }
 
     // 2. "Catalog" Catalog (Watch Availability)
-    fullCatalogs.push({
-        type: "movie",
-        id: `tmdb.movie.${slug}_catalog`,
-        name: `${providerName}`,
-        extra: [{ 
-            name: "genre", 
-            isRequired: false,
-            options: Object.keys(MOVIE_GENRES) 
-        }, { name: "skip", isRequired: false }]
-    });
+    if (!isSeriesOnly) {
+        fullCatalogs.push({
+            type: "movie",
+            id: `tmdb.movie.${slug}_catalog`,
+            name: `${providerName}`,
+            extra: [{ 
+                name: "genre", 
+                isRequired: false,
+                options: Object.keys(MOVIE_GENRES) 
+            }, { name: "skip", isRequired: false }]
+        });
+    }
     fullCatalogs.push({
         type: "series",
         id: `tmdb.series.${slug}_catalog`,
@@ -4115,12 +4131,14 @@ Object.keys(PROVIDERS).forEach(providerName => {
     });
 
     if (TOP10_PROVIDER_PAGE_SLUGS[slug]) {
-        fullCatalogs.push({
-            type: "movie",
-            id: buildTop10ManifestId("movie", slug),
-            name: `${providerName} Top 10 Italia`,
-            extra: [{ name: "skip", isRequired: false }]
-        });
+        if (!isSeriesOnly) {
+            fullCatalogs.push({
+                type: "movie",
+                id: buildTop10ManifestId("movie", slug),
+                name: `${providerName} Top 10 Italia`,
+                extra: [{ name: "skip", isRequired: false }]
+            });
+        }
         fullCatalogs.push({
             type: "series",
             id: buildTop10ManifestId("series", slug),

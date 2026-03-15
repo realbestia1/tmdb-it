@@ -1984,6 +1984,7 @@
             { name: "Apple TV+", slug: "apple" },
             { name: "HBO Max", slug: "hbo" },
             { name: "Paramount+", slug: "paramount" },
+            { name: "Discovery+", slug: "discoverypluseu", supportsOriginal: true, seriesOnly: true },
             { name: "Sky Go / NOW", slug: "now" },
             { name: "Rai Play", slug: "rai" },
             { name: "Mediaset Infinity", slug: "mediaset" },
@@ -1998,6 +1999,7 @@
             apple: "apple-tv-plus",
             hbo: "hbo-max",
             paramount: "paramount-plus",
+            discoverypluseu: "discovery-plus-eu",
             now: "now-tv",
             sky: null,
             mediaset: "mediaset-infinity",
@@ -2070,6 +2072,9 @@
         const PROVIDERS_BY_SLUG = Object.fromEntries(PROVIDERS.map(provider => [provider.slug, provider]));
         function providerSupportsOriginal(provider) {
             return !!(provider && provider.supportsOriginal !== false);
+        }
+        function providerIsSeriesOnly(provider) {
+            return !!(provider && provider.seriesOnly);
         }
         const DEFAULT_SORT_ORDERS = {
             standard: [
@@ -2566,15 +2571,16 @@
 
         function getProviderModeLabel(slug) {
             const provider = PROVIDERS_BY_SLUG[slug];
+            const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " · Solo Serie" : "";
             const isOriginal = !!catalogVisibility[`${slug}_original`];
             const isCatalog = !!catalogVisibility[`${slug}_catalog`];
             if (provider && !providerSupportsOriginal(provider)) {
-                return isCatalog ? "Completo" : "";
+                return isCatalog ? `Completo${seriesOnlySuffix}` : "";
             }
-            if (isOriginal && isCatalog) return "Original + Completo";
-            if (isOriginal) return "Original";
-            if (isCatalog) return "Completo";
-            return "";
+            if (isOriginal && isCatalog) return `Original + Completo${seriesOnlySuffix}`;
+            if (isOriginal) return `Original${seriesOnlySuffix}`;
+            if (isCatalog) return `Completo${seriesOnlySuffix}`;
+            return seriesOnlySuffix.trim();
         }
 
         function getSelectedCatalogEntryDetails(key) {
@@ -2583,11 +2589,12 @@
 
             if (section === "top10") {
                 if (provider) {
+                    const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " · Solo Serie" : "";
                     return {
                         renameId: id,
                         defaultName: `${provider.name} Top 10 Italia`,
                         tags: ["Top 10", "Provider"],
-                        note: "Top 10 Italia"
+                        note: `Top 10 Italia${seriesOnlySuffix}`
                     };
                 }
 
@@ -3037,6 +3044,8 @@
             const isTop10Section = section === "top10";
             const supportsOriginal = providerSupportsOriginal(provider);
             const isAnyActive = isTop10Section ? isTop10 : (supportsOriginal ? (isOriginal || isCatalog) : isCatalog);
+            const seriesOnly = providerIsSeriesOnly(provider);
+            const top10ToggleLabel = seriesOnly ? "Serie" : "Movie & Series";
             const customName = getCatalogCustomName(id);
             const displayName = customName || provider.name;
             const landscapeKey = makeSelectedCatalogKey(section, id);
@@ -3086,7 +3095,7 @@
                     </div>
                     ` : `
                     <div class="toggle-group">
-                        <span class="toggle-label">Movie & Series</span>
+                        <span class="toggle-label">${top10ToggleLabel}</span>
                         <label class="switch">
                             <input type="checkbox" class="vis-top10" ${isTop10 ? "checked" : ""}>
                             <span class="slider"></span>

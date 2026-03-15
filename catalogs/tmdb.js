@@ -64,6 +64,7 @@ const PROVIDERS = {
   "Disney+": 337,
   "Apple TV+": 350,
   "Paramount+": 531,
+  "Discovery+": 524,
   "NOW": 39,
   "Sky Go": 29,
   "Rai Play": 222,
@@ -119,6 +120,7 @@ const SLUG_TO_PROVIDER = {
   "apple": "Apple TV+",
   "hbo": "HBO Max",
   "paramount": "Paramount+",
+  "discoverypluseu": "Discovery+",
   "now": "NOW",
   "sky": "Sky Go",
   "rai": "Rai Play",
@@ -136,14 +138,17 @@ function getCatalog(type, id, filters) {
         providerFromId = SLUG_TO_PROVIDER[parts[1]];
       }
       if (providerFromId) {
+        const providerId = PROVIDERS[providerFromId];
         if (type === "movie") {
           const companyId = COMPANY_IDS[providerFromId];
           endpoint = "discover/movie";
           if (companyId) queryParams += `&with_companies=${companyId}`;
+          else if (providerId) queryParams += `&with_watch_providers=${providerId}&watch_region=IT`;
         } else {
           const networkId = NETWORK_IDS[providerFromId];
           endpoint = "discover/tv";
           if (networkId) queryParams += `&with_networks=${networkId}`;
+          else if (providerId) queryParams += `&with_watch_providers=${providerId}&watch_region=IT`;
         }
         queryParams += `&sort_by=popularity.desc`;
       }
