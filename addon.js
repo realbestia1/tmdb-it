@@ -313,6 +313,15 @@ function normalizeErdbRatings(rawRatings) {
         .filter(value => ERDB_RATING_PROVIDERS.has(value));
 }
 
+function parseErdbRatings(rawRatings) {
+    const values = normalizeErdbRatings(rawRatings);
+    const hasValue = rawRatings !== undefined && rawRatings !== null;
+    return {
+        values,
+        explicitEmpty: hasValue && values.length === 0
+    };
+}
+
 function normalizeErdbStyle(value) {
     const normalized = String(value || "").trim().toLowerCase();
     return ERDB_RATING_STYLES.has(normalized) ? normalized : "";
@@ -436,7 +445,10 @@ function getErdbConfig(config = null) {
 
     if (!baseUrl || !tmdbKey || !mdblistKey) return null;
 
-    const ratings = normalizeErdbRatings(rawConfig.ratings);
+    const ratingsInfo = parseErdbRatings(rawConfig.ratings);
+    const posterRatingsInfo = parseErdbRatings(rawConfig.posterRatings);
+    const backdropRatingsInfo = parseErdbRatings(rawConfig.backdropRatings);
+    const logoRatingsInfo = parseErdbRatings(rawConfig.logoRatings);
     const lang = normalizeErdbLang(rawConfig.lang);
     const posterRatingStyle = normalizeErdbStyle(rawConfig.posterRatingStyle);
     const backdropRatingStyle = normalizeErdbStyle(rawConfig.backdropRatingStyle);
@@ -446,8 +458,12 @@ function getErdbConfig(config = null) {
     const posterRatingsLayout = normalizeErdbPosterLayout(rawConfig.posterRatingsLayout);
     const backdropRatingsLayout = normalizeErdbBackdropLayout(rawConfig.backdropRatingsLayout);
     const streamBadges = normalizeErdbStreamBadges(rawConfig.streamBadges);
+    const posterStreamBadges = normalizeErdbStreamBadges(rawConfig.posterStreamBadges);
+    const backdropStreamBadges = normalizeErdbStreamBadges(rawConfig.backdropStreamBadges);
     const qualityBadgesSide = normalizeErdbQualityBadgesSide(rawConfig.qualityBadgesSide);
     const qualityBadgesStyle = normalizeErdbStyle(rawConfig.qualityBadgesStyle);
+    const posterQualityBadgesStyle = normalizeErdbStyle(rawConfig.posterQualityBadgesStyle);
+    const backdropQualityBadgesStyle = normalizeErdbStyle(rawConfig.backdropQualityBadgesStyle);
     const maxPerSideRaw = rawConfig.posterRatingsMaxPerSide;
     const maxPerSideParsed = parseInt(maxPerSideRaw, 10);
     const posterRatingsMaxPerSide = Number.isFinite(maxPerSideParsed) && maxPerSideParsed >= 1 && maxPerSideParsed <= 20
@@ -467,7 +483,14 @@ function getErdbConfig(config = null) {
         baseUrl,
         tmdbKey,
         mdblistKey,
-        ratings,
+        ratings: ratingsInfo.values,
+        ratingsExplicitEmpty: ratingsInfo.explicitEmpty,
+        posterRatings: posterRatingsInfo.values,
+        posterRatingsExplicitEmpty: posterRatingsInfo.explicitEmpty,
+        backdropRatings: backdropRatingsInfo.values,
+        backdropRatingsExplicitEmpty: backdropRatingsInfo.explicitEmpty,
+        logoRatings: logoRatingsInfo.values,
+        logoRatingsExplicitEmpty: logoRatingsInfo.explicitEmpty,
         lang,
         posterRatingStyle,
         backdropRatingStyle,
@@ -478,8 +501,12 @@ function getErdbConfig(config = null) {
         posterRatingsMaxPerSide,
         backdropRatingsLayout,
         streamBadges,
+        posterStreamBadges,
+        backdropStreamBadges,
         qualityBadgesSide,
         qualityBadgesStyle,
+        posterQualityBadgesStyle,
+        backdropQualityBadgesStyle,
         enabledTypes
     };
 }
@@ -492,21 +519,47 @@ function buildErdbUrl(config, assetType, erdbId) {
     query.set("mdblistKey", config.mdblistKey);
     if (Array.isArray(config.ratings) && config.ratings.length > 0) {
         query.set("ratings", config.ratings.join(","));
+    } else if (config.ratingsExplicitEmpty) {
+        query.set("ratings", "");
     }
     if (config.lang) query.set("lang", config.lang);
     if (config.streamBadges) query.set("streamBadges", config.streamBadges);
-    if (config.qualityBadgesSide && assetType === "poster") {
-        query.set("qualityBadgesSide", config.qualityBadgesSide);
-    }
-    if (config.qualityBadgesStyle && assetType === "poster") {
-        query.set("qualityBadgesStyle", config.qualityBadgesStyle);
-    }
+    if (config.qualityBadgesStyle) query.set("qualityBadgesStyle", config.qualityBadgesStyle);
     const ratingStyle = assetType === "poster"
         ? config.posterRatingStyle
         : assetType === "backdrop"
             ? config.backdropRatingStyle
             : config.logoRatingStyle;
     if (ratingStyle) query.set("ratingStyle", ratingStyle);
+
+    if (assetType === "poster") {
+        if (Array.isArray(config.posterRatings) && config.posterRatings.length > 0) {
+            query.set("posterRatings", config.posterRatings.join(","));
+        } else if (config.posterRatingsExplicitEmpty) {
+            query.set("posterRatings", "");
+        }
+        if (config.posterStreamBadges) query.set("posterStreamBadges", config.posterStreamBadges);
+        if (config.qualityBadgesSide) query.set("qualityBadgesSide", config.qualityBadgesSide);
+        if (config.posterQualityBadgesStyle) {
+            query.set("posterQualityBadgesStyle", config.posterQualityBadgesStyle);
+        }
+    } else if (assetType === "backdrop") {
+        if (Array.isArray(config.backdropRatings) && config.backdropRatings.length > 0) {
+            query.set("backdropRatings", config.backdropRatings.join(","));
+        } else if (config.backdropRatingsExplicitEmpty) {
+            query.set("backdropRatings", "");
+        }
+        if (config.backdropStreamBadges) query.set("backdropStreamBadges", config.backdropStreamBadges);
+        if (config.backdropQualityBadgesStyle) {
+            query.set("backdropQualityBadgesStyle", config.backdropQualityBadgesStyle);
+        }
+    } else if (assetType === "logo") {
+        if (Array.isArray(config.logoRatings) && config.logoRatings.length > 0) {
+            query.set("logoRatings", config.logoRatings.join(","));
+        } else if (config.logoRatingsExplicitEmpty) {
+            query.set("logoRatings", "");
+        }
+    }
 
     if (assetType !== "logo") {
         const imageText = assetType === "backdrop" ? config.backdropImageText : config.posterImageText;
