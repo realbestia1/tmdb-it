@@ -40,16 +40,21 @@ function isNegativeCache(value) {
     return !!(value && typeof value === "object" && value[NEGATIVE_CACHE_MARKER] === true);
 }
 
-async function getImdbRating(imdbId, type) {
+async function fetchCinemetaMeta(imdbId, type) {
     if (!imdbId) return null;
     try {
         const response = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
         const data = await response.json();
-        return data && data.meta && data.meta.imdbRating ? data.meta.imdbRating : null;
+        return data && data.meta && typeof data.meta === "object" ? data.meta : null;
     } catch (e) {
-        console.warn(`Error fetching IMDb rating for ${imdbId}:`, e.message);
+        console.warn(`Error fetching Cinemeta meta for ${imdbId}:`, e.message);
         return null;
     }
+}
+
+async function getImdbRating(imdbId, type) {
+    const cinemetaMeta = await fetchCinemetaMeta(imdbId, type);
+    return cinemetaMeta && cinemetaMeta.imdbRating ? cinemetaMeta.imdbRating : null;
 }
 
 function normalizeImdbId(imdbId) {
@@ -800,6 +805,7 @@ async function enrichAndMapItems(results, stremioType, tmdbType, config = null, 
         const preferredName = preferKitsuId
             ? (item.title || item.name || (details ? (details.title || details.name) : null))
             : getPreferredTmdbTitle(details || item, stremioType);
+        const metadataSource = details || item;
 
         return {
             id: metaId,
@@ -814,6 +820,8 @@ async function enrichAndMapItems(results, stremioType, tmdbType, config = null, 
             released: safeToIsoString(exactReleaseDate),
             imdbRating: item.vote_average ? item.vote_average.toFixed(1) : null,
             runtime: runtime,
+            language: getTmdbMetaLanguage(metadataSource) || undefined,
+            country: getTmdbMetaCountry(metadataSource) || undefined,
             genres: genres,
             cast: cast,
             director: director,
@@ -1725,6 +1733,142 @@ function uniqueNonEmptyStrings(values) {
             .map(value => String(value || "").trim())
             .filter(Boolean)
     )];
+}
+
+function getDisplayNameForMetaCode(type, rawCode) {
+    const normalizedCode = String(rawCode || "").trim();
+    if (!normalizedCode) return null;
+
+    try {
+        const displayNames = new Intl.DisplayNames(["en"], { type });
+        const formattedCode = type === "region"
+            ? normalizedCode.toUpperCase()
+            : normalizedCode.replace(/_/g, "-").toLowerCase();
+        const displayValue = displayNames.of(formattedCode);
+        return displayValue && displayValue !== formattedCode ? displayValue : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function getMetaNamedValue(entry, options = {}) {
+    const { type = null, keys = [] } = options;
+
+    if (entry === null || entry === undefined) return null;
+
+    if (typeof entry === "string" || typeof entry === "number") {
+        const rawValue = String(entry).trim();
+        if (!rawValue) return null;
+
+        if (type === "language" && /^[a-z]{2,3}(?:[-_][a-z]{2})?$/i.test(rawValue)) {
+            return getDisplayNameForMetaCode("language", rawValue) || rawValue;
+        }
+
+        if (type === "region" && /^[a-z]{2,3}$/i.test(rawValue)) {
+            return getDisplayNameForMetaCode("region", rawValue) || rawValue.toUpperCase();
+        }
+
+        return rawValue;
+    }
+
+    if (typeof entry !== "object") return null;
+
+    const candidateKeys = keys.length > 0
+        ? keys
+        : [
+            "english_name",
+            "englishName",
+            "native_name",
+            "nativeName",
+            "name",
+            "title",
+            "label",
+            "shortCode",
+            "iso_639_1",
+            "iso_639_2",
+            "iso_3166_1",
+            "code"
+        ];
+
+    for (const key of candidateKeys) {
+        if (!Object.prototype.hasOwnProperty.call(entry, key)) continue;
+        const resolved = getMetaNamedValue(entry[key], { type });
+        if (resolved) return resolved;
+    }
+
+    return null;
+}
+
+function getMetaNamedValues(entries, options = {}) {
+    const values = Array.isArray(entries) ? entries : [entries];
+    return uniqueNonEmptyStrings(values.map(entry => getMetaNamedValue(entry, options)));
+}
+
+function joinMetaNamedValues(entries, options = {}) {
+    const values = getMetaNamedValues(entries, options);
+    return values.length > 0 ? values.join(", ") : null;
+}
+
+function getTmdbMetaLanguage(payload = {}) {
+    return joinMetaNamedValues(payload.spoken_languages, {
+        type: "language",
+        keys: ["english_name", "name", "iso_639_1", "iso_639_2"]
+    }) || getMetaNamedValue(payload.original_language, { type: "language" });
+}
+
+function getTmdbMetaCountry(payload = {}) {
+    return joinMetaNamedValues(payload.production_countries, {
+        type: "region",
+        keys: ["name", "english_name", "iso_3166_1"]
+    }) || joinMetaNamedValues(payload.origin_country, { type: "region" });
+}
+
+function getTvdbMetaLanguage(series = {}) {
+    return joinMetaNamedValues(series.languages, {
+        type: "language",
+        keys: ["name", "nativeName", "englishName", "shortCode", "code"]
+    }) || getMetaNamedValue(
+        series.originalLanguage ||
+        series.original_language ||
+        series.primaryLanguage ||
+        series.primary_language ||
+        series.language,
+        { type: "language" }
+    );
+}
+
+function getTvdbMetaCountry(series = {}) {
+    return joinMetaNamedValues(series.countries, {
+        type: "region",
+        keys: ["name", "englishName", "nativeName", "code", "shortCode", "iso_3166_1"]
+    }) || getMetaNamedValue(
+        series.originalCountry ||
+        series.original_country ||
+        series.countryOfOrigin ||
+        series.country_of_origin ||
+        series.country,
+        { type: "region" }
+    );
+}
+
+function getKitsuMetaLanguage(attributes = {}) {
+    return getMetaNamedValue(
+        attributes.language ||
+        attributes.originalLanguage ||
+        attributes.original_language,
+        { type: "language" }
+    );
+}
+
+function getKitsuMetaCountry(attributes = {}) {
+    return getMetaNamedValue(
+        attributes.country ||
+        attributes.countryOfOrigin ||
+        attributes.country_of_origin ||
+        attributes.originCountry ||
+        attributes.origin_country,
+        { type: "region" }
+    );
 }
 
 function normalizeMatchTitle(value) {
@@ -3967,6 +4111,9 @@ async function buildMetaForTvdbSeriesId(id, config = null) {
             (tmdbBaseMeta && (tmdbBaseMeta.background || tmdbBaseMeta.poster)) || background || poster || null,
             config
         );
+    const fallbackCinemetaMeta = !tmdbBaseMeta && imdbId
+        ? await fetchCinemetaMeta(imdbId, "series")
+        : null;
 
     if (tmdbBaseMeta) {
         return {
@@ -4001,8 +4148,8 @@ async function buildMetaForTvdbSeriesId(id, config = null) {
         releaseInfo,
         released,
         year: year || undefined,
-        imdbRating: imdbId
-            ? await getImdbRating(imdbId, "series")
+        imdbRating: fallbackCinemetaMeta && fallbackCinemetaMeta.imdbRating
+            ? fallbackCinemetaMeta.imdbRating
             : null,
         genres: getTvdbGenreNames(series),
         cast: getTvdbCastNames(series),
@@ -4016,6 +4163,9 @@ async function buildMetaForTvdbSeriesId(id, config = null) {
             }]
             : [],
         runtime: getTvdbRuntime(series),
+        language: getTvdbMetaLanguage(series) || undefined,
+        country: getTvdbMetaCountry(series) || getMetaNamedValue(fallbackCinemetaMeta && fallbackCinemetaMeta.country) || undefined,
+        awards: getMetaNamedValue(fallbackCinemetaMeta && fallbackCinemetaMeta.awards) || undefined,
         trailers: [],
         trailerStreams: [],
         behaviorHints: {
@@ -4616,6 +4766,8 @@ function buildKitsuMetaFromPayload(kitsuId, payload, requestedType, config = nul
         runtime: attributes.episodeLength
             ? `${attributes.episodeLength} min`
             : (attributes.totalLength ? `${attributes.totalLength} min` : null),
+        language: getKitsuMetaLanguage(attributes) || undefined,
+        country: getKitsuMetaCountry(attributes) || undefined,
         genres: getKitsuCategories(payload),
         links: franchiseLinks,
         behaviorHints: {}
@@ -4784,6 +4936,8 @@ async function mapKitsuCatalogItemToMeta(item, forcedType = null, config = null,
         releaseInfo: releaseInfo || undefined,
         released: safeToIsoString(attributes.startDate),
         imdbRating: attributes.averageRating ? (parseFloat(attributes.averageRating) / 10).toFixed(1) : null,
+        language: getKitsuMetaLanguage(attributes) || undefined,
+        country: getKitsuMetaCountry(attributes) || undefined,
         behaviorHints: {
             defaultVideoId: type === "movie" ? metaId : null,
             hasScheduledVideos: type === "series"
@@ -5770,16 +5924,8 @@ async function transformToMeta(item, type, config = null, options = {}) {
     let fetchedImdbRating = null;
     
     if (imdbId) {
-        try {
-            const response = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
-            const data = await response.json();
-            if (data && data.meta) {
-                cinemetaMeta = data.meta;
-                fetchedImdbRating = cinemetaMeta.imdbRating;
-            }
-        } catch (e) {
-            console.warn(`Error fetching Cinemeta for ${imdbId}:`, e.message);
-        }
+        cinemetaMeta = await fetchCinemetaMeta(imdbId, type);
+        fetchedImdbRating = cinemetaMeta && cinemetaMeta.imdbRating ? cinemetaMeta.imdbRating : null;
     }
 
     let poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : "";
@@ -5877,6 +6023,9 @@ async function transformToMeta(item, type, config = null, options = {}) {
             })) : [])
         ],
         runtime: isMovie ? (item.runtime ? `${item.runtime} min` : null) : (item.episode_run_time && item.episode_run_time[0] ? `${item.episode_run_time[0]} min` : null),
+        language: getTmdbMetaLanguage(item) || undefined,
+        country: getTmdbMetaCountry(item) || getMetaNamedValue(cinemetaMeta && cinemetaMeta.country) || undefined,
+        awards: getMetaNamedValue(cinemetaMeta && cinemetaMeta.awards) || undefined,
         // Match tmdb-addon implementation for trailers
         trailers: trailers,
         trailerStreams: trailerStreams,
