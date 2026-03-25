@@ -301,6 +301,7 @@ const ERDB_RATING_PROVIDERS = new Set([
     "metacritic",
     "metacriticuser",
     "trakt",
+    "simkl",
     "rogerebert",
     "myanimelist",
     "anilist",
@@ -487,6 +488,7 @@ function getErdbConfig(config = null) {
     const baseUrl = normalizeErdbBaseUrl(rawConfig.baseUrl);
     const tmdbKey = normalizeErdbQueryParam(rawConfig.tmdbKey);
     const mdblistKey = normalizeErdbQueryParam(rawConfig.mdblistKey);
+    const simklClientId = normalizeErdbQueryParam(rawConfig.simklClientId);
 
     if (!baseUrl || !tmdbKey || !mdblistKey) return null;
 
@@ -503,6 +505,7 @@ function getErdbConfig(config = null) {
         baseUrl,
         tmdbKey,
         mdblistKey,
+        simklClientId,
         rawConfig,
         enabledTypes
     };
@@ -539,6 +542,7 @@ function buildErdbUrl(config, assetType, erdbId) {
 
     setQueryParam("tmdbKey", config.tmdbKey);
     setQueryParam("mdblistKey", config.mdblistKey);
+    setQueryParam("simklClientId", config.simklClientId);
     setQueryParam("ratings", rawConfig.ratings, { preserveEmpty: true });
     setQueryParam("posterRatings", rawConfig.posterRatings, { preserveEmpty: true });
     setQueryParam("backdropRatings", rawConfig.backdropRatings, { preserveEmpty: true });
