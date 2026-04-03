@@ -378,6 +378,18 @@ function applyConfiguredCatalogShape(catalog, lookupKey, shapes) {
     return { ...catalog, posterShape: "landscape" };
 }
 
+function createDiscoverOnlyCatalog(catalog) {
+    if (!catalog) return catalog;
+
+    const extra = Array.isArray(catalog.extra) ? [...catalog.extra] : [];
+    const hasDiscoverExtra = extra.some(entry => entry && entry.name === "discover");
+    if (!hasDiscoverExtra) {
+        extra.push({ name: "discover", isRequired: true, options: ["only", "Only"] });
+    }
+
+    return { ...catalog, extra };
+}
+
 function getTextBackdropFromDetails(details, preferredLangs = ["it", "en"]) {
     const backdrops = details && details.images && Array.isArray(details.images.backdrops)
         ? details.images.backdrops
@@ -1347,6 +1359,17 @@ function isHomeCatalogRequest(extra = {}) {
     });
 
     return keys.every(key => key === "skip");
+}
+
+function isDiscoverCatalogRequest(extra = {}) {
+    if (!extra || typeof extra !== "object") return false;
+    if (!Object.prototype.hasOwnProperty.call(extra, "discover")) return false;
+
+    const discoverValue = extra.discover;
+    if (discoverValue === undefined || discoverValue === null) return true;
+    if (typeof discoverValue === "boolean") return discoverValue;
+
+    return String(discoverValue).trim().length >= 0;
 }
 
 function filterCatalogItems(results, catalogId, allowFuture = false) {
@@ -4444,7 +4467,7 @@ async function fetchKitsuCatalogMetas(catalogId, requestedType, extra = {}, conf
     const skip = Math.max(0, Number.parseInt(String(extra && extra.skip || "0"), 10) || 0);
     const search = typeof extra.search === "string" ? extra.search.trim() : "";
     const discover = typeof extra.discover === "string" ? extra.discover.trim() : "";
-    const isDiscoverRequest = discover.toLowerCase() === "only";
+    const isDiscoverRequest = isDiscoverCatalogRequest(extra);
     const pageLimit = isDiscoverRequest ? 100 : 20;
     const isSearchCatalog = normalizedCatalogId === "kitsu.series.search" ||
         normalizedCatalogId === "kitsu.movie.search" ||
@@ -6162,9 +6185,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        const catClone = { ...resolvedCatalog, extra: [...(resolvedCatalog.extra || [])] };
-                        catClone.extra.push({ name: "discover", isRequired: true, options: ["Only"] });
-                        filteredCatalogs.push(catClone);
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6178,10 +6199,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        // Clone catalog to avoid mutating global state and add required filter
-                        const catClone = { ...resolvedCatalog, extra: [...(resolvedCatalog.extra || [])] };
-                        catClone.extra.push({ name: "discover", isRequired: true, options: ["Only"] });
-                        filteredCatalogs.push(catClone);
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6210,9 +6228,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        const mClone = { ...resolvedCatalog, extra: [...(resolvedCatalog.extra || [])] };
-                        mClone.extra.push({ name: "discover", isRequired: true, options: ["Only"] });
-                        filteredCatalogs.push(mClone);
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
