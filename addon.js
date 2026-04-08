@@ -214,6 +214,40 @@ function shouldReturnStreams(config = null) {
     return true;
 }
 
+function normalizeEasyProxyUrl(value) {
+    if (typeof value !== "string") return "";
+
+    let normalizedValue = value.trim();
+    if (!normalizedValue) return "";
+
+    while (normalizedValue.endsWith("/")) {
+        normalizedValue = normalizedValue.slice(0, -1);
+    }
+
+    return normalizedValue;
+}
+
+function getEasyStreamsConfig(config = null) {
+    const resolvedConfig = getRequestConfig(config);
+    const easyStreamsConfig = {
+        easyCatalogsLangIt: "on"
+    };
+
+    const easyProxyUrl = normalizeEasyProxyUrl(resolvedConfig.easyProxyUrl);
+    if (easyProxyUrl) {
+        easyStreamsConfig.easyProxyUrl = easyProxyUrl;
+    }
+
+    if (typeof resolvedConfig.easyProxyPassword === "string") {
+        const easyProxyPassword = resolvedConfig.easyProxyPassword.trim();
+        if (easyProxyPassword) {
+            easyStreamsConfig.easyProxyPassword = easyProxyPassword;
+        }
+    }
+
+    return easyStreamsConfig;
+}
+
 function encodeConfigSegment(config = null) {
     const resolvedConfig = getRequestConfig(config);
     if (!resolvedConfig || Object.keys(resolvedConfig).length === 0) return null;
@@ -245,18 +279,18 @@ function getManifestUrl(config = null) {
         : `${ADDON_URL}/manifest.json`;
 }
 
-function getEasyStreamsBaseUrl() {
-    return `${EASY_STREAMS_BASE_URL}/${encodeURIComponent(JSON.stringify({ easyCatalogsLangIt: "on" }))}`;
+function getEasyStreamsBaseUrl(config = null) {
+    return `${EASY_STREAMS_BASE_URL}/${encodeURIComponent(JSON.stringify(getEasyStreamsConfig(config)))}`;
 }
 
-function getEasyStreamsManifestUrl() {
-    return `${getEasyStreamsBaseUrl()}/manifest.json`;
+function getEasyStreamsManifestUrl(config = null) {
+    return `${getEasyStreamsBaseUrl(config)}/manifest.json`;
 }
 
-function getEasyStreamsStreamUrl(type, id) {
+function getEasyStreamsStreamUrl(type, id, config = null) {
     const encodedType = encodeURIComponent(String(type || "").trim());
     const encodedId = encodeURIComponent(String(id || "").trim()).replace(/%3A/gi, ":");
-    return `${getEasyStreamsBaseUrl()}/stream/${encodedType}/${encodedId}.json`;
+    return `${getEasyStreamsBaseUrl(config)}/stream/${encodedType}/${encodedId}.json`;
 }
 
 function normalizeConfiguredCatalogEntryKey(key) {
@@ -844,7 +878,7 @@ async function enrichAndMapItems(results, stremioType, tmdbType, config = null, 
         let textBackdrop = null;
         let kitsuId = null;
         const resolvedConfig = getRequestConfig(config);
-        const manifestUrl = getEasyStreamsManifestUrl();
+        const manifestUrl = getEasyStreamsManifestUrl(resolvedConfig);
 
         if (item.genre_ids) {
             genres = item.genre_ids.map(id => GENRE_ID_TO_NAME[id]).filter(Boolean);
@@ -5247,7 +5281,9 @@ manifest.catalogs = [fullCatalogs[0]];
 const builder = new addonBuilder(manifest);
 
 builder.defineStreamHandler(async ({ type, id }) => {
-    if (!shouldReturnStreams()) {
+    const config = getRequestConfig();
+
+    if (!shouldReturnStreams(config)) {
         return { streams: [] };
     }
 
@@ -5260,7 +5296,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
     }
 
     try {
-        const response = await fetch(getEasyStreamsStreamUrl(type, normalizedId), {
+        const response = await fetch(getEasyStreamsStreamUrl(type, normalizedId, config), {
             headers: {
                 Accept: "application/json"
             }
@@ -5386,7 +5422,7 @@ async function transformToMeta(item, type, config = null, options = {}) {
     const isMovie = type === "movie";
     const year = item.release_date ? item.release_date.split("-")[0] : (item.first_air_date ? item.first_air_date.split("-")[0] : "");
     const resolvedConfig = getRequestConfig(config);
-    const manifestUrl = getEasyStreamsManifestUrl();
+    const manifestUrl = getEasyStreamsManifestUrl(resolvedConfig);
     const includeVideos = options.includeVideos !== false;
 
     // Improved logic for exact release date (Italy)

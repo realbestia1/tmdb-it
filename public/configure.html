@@ -883,6 +883,8 @@
 
         input[type="text"],
         input[type="number"],
+        input[type="url"],
+        input[type="password"],
         select {
             background-color: var(--bg-color);
             border: 1px solid var(--border-color);
@@ -922,6 +924,8 @@
 
         input[type="text"]:focus,
         input[type="number"]:focus,
+        input[type="url"]:focus,
+        input[type="password"]:focus,
         select:focus {
             outline: none;
             border-color: var(--accent-color);
@@ -1877,6 +1881,16 @@
                                         <span class="slider"></span>
                                     </label>
                                 </div>
+                            </div>
+                            <div class="input-group" style="margin-top: 1rem;">
+                                <label for="easyProxyUrl">EasyProxy URL (opzionale)</label>
+                                <input type="url" id="easyProxyUrl" placeholder="https://your-proxy.example.com">
+                                <div class="input-hint">Se Easy Streams richiede un proxy, inserisci qui l'URL base del tuo EasyProxy.</div>
+                            </div>
+                            <div class="input-group">
+                                <label for="easyProxyPassword">EasyProxy Password (opzionale)</label>
+                                <input type="password" id="easyProxyPassword" placeholder="Password API del proxy">
+                                <div class="input-hint">Viene inoltrata a Easy Streams come configurazione del manifest.</div>
                             </div>
                             <div class="step-footer">
                                 <button type="button" class="btn btn-primary"
@@ -3051,6 +3065,14 @@
                 document.getElementById("tmdbApiKey").value = resolvedConfig.tmdbApiKey;
             }
 
+            if (typeof resolvedConfig.easyProxyUrl === "string") {
+                document.getElementById("easyProxyUrl").value = resolvedConfig.easyProxyUrl;
+            }
+
+            if (typeof resolvedConfig.easyProxyPassword === "string") {
+                document.getElementById("easyProxyPassword").value = resolvedConfig.easyProxyPassword;
+            }
+
             applyErdbConfigFields(resolvedConfig);
 
             if (typeof resolvedConfig.catalogs !== "string" || !resolvedConfig.catalogs.trim()) return;
@@ -3511,9 +3533,13 @@
             const config = {};
             const tmdbApiKey = document.getElementById("tmdbApiKey").value.trim();
             const returnStreams = document.getElementById("returnStreams").checked;
+            const easyProxyUrl = document.getElementById("easyProxyUrl").value.trim().replace(/\/+$/, "");
+            const easyProxyPassword = document.getElementById("easyProxyPassword").value.trim();
 
             if (tmdbApiKey) config.tmdbApiKey = tmdbApiKey;
             if (!returnStreams) config.returnStreams = false;
+            if (easyProxyUrl) config.easyProxyUrl = easyProxyUrl;
+            if (easyProxyPassword) config.easyProxyPassword = easyProxyPassword;
 
             const erdbTokenValue = document.getElementById("erdbToken").value.trim();
             const erdbBaseUrlValue = normalizeErdbBaseUrl(document.getElementById("erdbBaseUrl").value.trim());
