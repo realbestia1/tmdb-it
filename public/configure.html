@@ -1882,15 +1882,17 @@
                                     </label>
                                 </div>
                             </div>
-                            <div class="input-group" style="margin-top: 1rem;">
-                                <label for="easyProxyUrl">EasyProxy URL (opzionale)</label>
-                                <input type="url" id="easyProxyUrl" placeholder="https://your-proxy.example.com">
-                                <div class="input-hint">Se Easy Streams richiede un proxy, inserisci qui l'URL base del tuo EasyProxy.</div>
-                            </div>
-                            <div class="input-group">
-                                <label for="easyProxyPassword">EasyProxy Password (opzionale)</label>
-                                <input type="password" id="easyProxyPassword" placeholder="Password API del proxy">
-                                <div class="input-hint">Viene inoltrata a Easy Streams come configurazione del manifest.</div>
+                            <div id="easyProxySettings" style="display: none;">
+                                <div class="input-group" style="margin-top: 1rem;">
+                                    <label for="easyProxyUrl">EasyProxy URL (opzionale)</label>
+                                    <input type="url" id="easyProxyUrl" placeholder="https://your-proxy.example.com">
+                                    <div class="input-hint">Se Easy Streams richiede un proxy, inserisci qui l'URL base del tuo EasyProxy.</div>
+                                </div>
+                                <div class="input-group">
+                                    <label for="easyProxyPassword">EasyProxy Password (opzionale)</label>
+                                    <input type="password" id="easyProxyPassword" placeholder="Password API del proxy">
+                                    <div class="input-hint">Viene inoltrata a Easy Streams come configurazione del manifest.</div>
+                                </div>
                             </div>
                             <div class="step-footer">
                                 <button type="button" class="btn btn-primary"
@@ -3054,6 +3056,14 @@
             renderCatalogList("standard");
         }
 
+        function updateEasyProxyVisibility() {
+            const returnStreamsInput = document.getElementById("returnStreams");
+            const easyProxySettings = document.getElementById("easyProxySettings");
+            if (!returnStreamsInput || !easyProxySettings) return;
+
+            easyProxySettings.style.display = returnStreamsInput.checked ? "" : "none";
+        }
+
         function applyInitialConfiguration(config) {
             const resolvedConfig = config && typeof config === "object" ? config : {};
             catalogCustomNames = normalizeCatalogCustomNames(resolvedConfig.catalogNames);
@@ -3072,6 +3082,8 @@
             if (typeof resolvedConfig.easyProxyPassword === "string") {
                 document.getElementById("easyProxyPassword").value = resolvedConfig.easyProxyPassword;
             }
+
+            updateEasyProxyVisibility();
 
             applyErdbConfigFields(resolvedConfig);
 
@@ -3694,6 +3706,11 @@
         const erdbTokenInput = document.getElementById("erdbToken");
         if (erdbTokenInput) {
             erdbTokenInput.addEventListener("input", updateErdbToggleVisibility);
+        }
+
+        const returnStreamsInput = document.getElementById("returnStreams");
+        if (returnStreamsInput) {
+            returnStreamsInput.addEventListener("change", updateEasyProxyVisibility);
         }
 
         applyInitialConfiguration(decodeConfigFromPath());
