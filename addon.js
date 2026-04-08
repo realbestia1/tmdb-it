@@ -3811,7 +3811,8 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
     const seasonsDetails = await Promise.all(seasonPromises);
     const cinemetaEpisodes = buildCinemetaEpisodeMap(cinemetaMeta);
     const videos = [];
-    const imdbId = item.imdb_id || (item.external_ids && item.external_ids.imdb_id);
+    const imdbId = normalizeImdbId(item.imdb_id || (item.external_ids && item.external_ids.imdb_id));
+    const primaryMediaId = getPrimaryMediaId(imdbId, item.id);
     const fallbackBackdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w500${item.backdrop_path}` : null;
 
     seasonsDetails.forEach(seasonData => {
@@ -3821,7 +3822,6 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
         const shouldRenumber = firstEpisode && firstEpisode.episode_number > 1 && firstEpisode.season_number > 0;
 
         seasonData.episodes.forEach((episode, index) => {
-            const idPrefix = imdbId || `tmdb:${item.id}`;
             let released = null;
             if (episode.air_date) {
                 try {
@@ -3833,14 +3833,14 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
 
             const cinemetaThumb = cinemetaEpisodes[`${episode.season_number}:${episode.episode_number}`]?.thumbnail;
             const episodeNumber = shouldRenumber ? (index + 1) : episode.episode_number;
-            const episodeMediaId = `${getPrimaryMediaId(imdbId, item.id)}:${episode.season_number}:${episodeNumber}`;
+            const episodeMediaId = `${primaryMediaId}:${episode.season_number}:${episodeNumber}`;
             const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId, "series");
             const fallbackThumbnail = episode.still_path
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
 
             videos.push({
-                id: `${idPrefix}:${episode.season_number}:${episodeNumber}`,
+                id: `${primaryMediaId}:${episode.season_number}:${episodeNumber}`,
                 title: episode.name,
                 released,
                 thumbnail: configuredThumbnailUrl || fallbackThumbnail,
@@ -3867,8 +3867,8 @@ function buildTmdbSeriesVideosFromEpisodeGroup(item, episodeGroupDetails, cineme
 
     const resolvedConfig = getRequestConfig(config);
     const cinemetaEpisodes = buildCinemetaEpisodeMap(cinemetaMeta);
-    const imdbId = item.imdb_id || (item.external_ids && item.external_ids.imdb_id);
-    const idPrefix = imdbId || `tmdb:${item.id}`;
+    const imdbId = normalizeImdbId(item.imdb_id || (item.external_ids && item.external_ids.imdb_id));
+    const primaryMediaId = getPrimaryMediaId(imdbId, item.id);
     const fallbackBackdrop = item.backdrop_path ? `https://image.tmdb.org/t/p/w500${item.backdrop_path}` : null;
     const sortedGroups = groups
         .map((group, index) => ({
@@ -3916,14 +3916,14 @@ function buildTmdbSeriesVideosFromEpisodeGroup(item, episodeGroupDetails, cineme
                 ? cinemetaEpisodes[`${originalSeasonNumber}:${originalEpisodeNumber}`]?.thumbnail
                 : null;
             const episodeNumber = episodeIndex + 1;
-            const episodeMediaId = `${getPrimaryMediaId(imdbId, item.id)}:${seasonNumber}:${episodeNumber}`;
+            const episodeMediaId = `${primaryMediaId}:${seasonNumber}:${episodeNumber}`;
             const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId, "series");
             const fallbackThumbnail = episode && episode.still_path
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
 
             videos.push({
-                id: `${idPrefix}:${seasonNumber}:${episodeNumber}`,
+                id: `${primaryMediaId}:${seasonNumber}:${episodeNumber}`,
                 title: (episode && episode.name) || `Episode ${episodeNumber}`,
                 released,
                 thumbnail: configuredThumbnailUrl || fallbackThumbnail,
@@ -5743,7 +5743,8 @@ async function transformToMeta(item, type, config = null, options = {}) {
     }
 
     // Get IMDb Rating and Metadata from Cinemeta (for rating and backup thumbnails)
-    const imdbId = item.imdb_id || (item.external_ids && item.external_ids.imdb_id);
+    const imdbId = normalizeImdbId(item.imdb_id || (item.external_ids && item.external_ids.imdb_id));
+    const primaryMediaId = getPrimaryMediaId(imdbId, item.id);
     let cinemetaMeta = null;
     let fetchedImdbRating = null;
 
@@ -5774,7 +5775,7 @@ async function transformToMeta(item, type, config = null, options = {}) {
     }
 
     return {
-        id: imdbId || `tmdb:${item.id}`,
+        id: primaryMediaId,
         type: type,
         name: getPreferredTmdbTitle(item, type),
         poster: poster,
@@ -5799,7 +5800,7 @@ async function transformToMeta(item, type, config = null, options = {}) {
             {
                 name: fetchedImdbRating || (item.vote_average !== undefined ? item.vote_average.toFixed(1) : "N/A"),
                 category: "imdb",
-                url: `https://imdb.com/title/${imdbId}`
+                url: imdbId ? `https://imdb.com/title/${imdbId}` : `https://www.themoviedb.org/${type === "movie" ? "movie" : "tv"}/${item.id}`
             },
             // Collection (Saga) Link
             ...(item.belongs_to_collection ? [{
@@ -5854,7 +5855,7 @@ async function transformToMeta(item, type, config = null, options = {}) {
         trailers: trailers,
         trailerStreams: trailerStreams,
         behaviorHints: {
-            defaultVideoId: isMovie ? (item.imdb_id || `tmdb:${item.id}`) : null,
+            defaultVideoId: isMovie ? primaryMediaId : null,
             hasScheduledVideos: !isMovie
         },
         videos: videos
@@ -6240,6 +6241,12 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             if (!queryParams.includes("with_release_type")) {
                 // Optional: Force theatrical or digital to avoid events/premieres
                 // queryParams += "&with_release_type=3|4"; 
+            }
+        }
+        if (endpoint && endpoint.includes("discover/tv")) {
+            const today = new Date().toISOString().split('T')[0];
+            if (!allowFuture && !queryParams.includes("first_air_date.lte")) {
+                queryParams += `&first_air_date.lte=${today}`;
             }
         }
 
