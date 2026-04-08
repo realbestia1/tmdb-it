@@ -877,7 +877,7 @@
 
         .addon-stream-row {
             display: grid;
-            grid-template-columns: 1fr auto;
+            grid-template-columns: minmax(180px, 0.45fr) minmax(0, 1fr) auto;
             gap: 0.6rem;
             align-items: center;
         }
@@ -3292,6 +3292,10 @@
             return Array.from(document.querySelectorAll(".custom-stream-addon-input"));
         }
 
+        function getCustomStreamAddonRows() {
+            return Array.from(document.querySelectorAll(".custom-stream-addon-row"));
+        }
+
         function normalizeCustomStreamAddonUrl(value) {
             let normalizedValue = String(value || "").trim();
             if (!normalizedValue) return "";
@@ -3307,24 +3311,29 @@
             return Array.from(document.querySelectorAll(".custom-catalog-addon-input"));
         }
 
+        function getCustomCatalogAddonRows() {
+            return Array.from(document.querySelectorAll(".custom-catalog-addon-row"));
+        }
+
         function normalizeCustomCatalogAddonUrl(value) {
             return normalizeCustomStreamAddonUrl(value);
         }
 
         async function loadCustomCatalogDefinitions() {
-            const manifestUrls = [...new Set(getCustomCatalogAddonValues())];
+            const addonEntries = getCustomCatalogAddonEntries();
+            const manifestUrls = addonEntries.map(entry => entry.url);
             customCatalogDefinitions = [];
 
-            if (manifestUrls.length === 0) {
+            if (addonEntries.length === 0) {
                 sortOrders.custom = [];
                 renderCatalogList("custom");
                 refreshSelectedCatalogList();
                 return;
             }
 
-            const manifests = await Promise.all(manifestUrls.map(async manifestUrl => {
+            const manifests = await Promise.all(addonEntries.map(async entry => {
                 try {
-                    const response = await fetch(normalizeCustomCatalogAddonUrl(manifestUrl), {
+                    const response = await fetch(normalizeCustomCatalogAddonUrl(entry.url), {
                         headers: { Accept: "application/json" }
                     });
                     if (!response.ok) return null;
@@ -3336,7 +3345,7 @@
 
             customCatalogDefinitions = manifests.flatMap((manifest, index) => {
                 const catalogs = Array.isArray(manifest && manifest.catalogs) ? manifest.catalogs : [];
-                const addonName = String(manifest && manifest.name || `Addon ${index + 1}`).trim();
+                const addonName = String(addonEntries[index].name || manifest && manifest.name || `Addon ${index + 1}`).trim();
 
                 return catalogs
                     .filter(catalog => catalog && typeof catalog === "object" && catalog.id && catalog.type)
@@ -3360,17 +3369,33 @@
         }
 
         function getCustomStreamAddonValues() {
-            return getCustomStreamAddonInputs()
-                .map(input => input.value)
-                .map(normalizeCustomStreamAddonUrl)
+            return getCustomStreamAddonEntries()
+                .map(entry => entry.url)
                 .filter(Boolean);
         }
 
         function getCustomCatalogAddonValues() {
-            return getCustomCatalogAddonInputs()
-                .map(input => input.value)
-                .map(normalizeCustomCatalogAddonUrl)
+            return getCustomCatalogAddonEntries()
+                .map(entry => entry.url)
                 .filter(Boolean);
+        }
+
+        function getCustomStreamAddonEntries() {
+            return getCustomStreamAddonRows()
+                .map(row => ({
+                    name: String(row.querySelector(".custom-stream-addon-name")?.value || "").trim(),
+                    url: normalizeCustomStreamAddonUrl(row.querySelector(".custom-stream-addon-input")?.value || "")
+                }))
+                .filter(entry => entry.url);
+        }
+
+        function getCustomCatalogAddonEntries() {
+            return getCustomCatalogAddonRows()
+                .map(row => ({
+                    name: String(row.querySelector(".custom-catalog-addon-name")?.value || "").trim(),
+                    url: normalizeCustomCatalogAddonUrl(row.querySelector(".custom-catalog-addon-input")?.value || "")
+                }))
+                .filter(entry => entry.url);
         }
 
         function renderCustomStreamAddonSummary() {
@@ -3431,13 +3456,19 @@
             }
         }
 
-        function createCustomStreamAddonRow(value = "") {
+        function createCustomStreamAddonRow(value = "", name = "") {
             const list = document.getElementById("customStreamAddonsList");
             if (!list) return;
 
             const row = document.createElement("div");
-            row.className = "addon-stream-row";
+            row.className = "addon-stream-row custom-stream-addon-row";
             row.innerHTML = `
+                <input
+                    type="text"
+                    class="custom-stream-addon-name"
+                    placeholder="Nome addon"
+                    value="${escapeHtml(name)}"
+                >
                 <input
                     type="url"
                     class="custom-stream-addon-input"
@@ -3448,12 +3479,14 @@
             `;
 
             const removeButton = row.querySelector(".addon-stream-remove");
+            const nameInput = row.querySelector(".custom-stream-addon-name");
             const input = row.querySelector(".custom-stream-addon-input");
             removeButton.addEventListener("click", () => {
                 row.remove();
                 ensureCustomStreamAddonRow();
                 renderCustomStreamAddonSummary();
             });
+            nameInput.addEventListener("input", renderCustomStreamAddonSummary);
             input.addEventListener("input", renderCustomStreamAddonSummary);
             input.addEventListener("blur", () => {
                 input.value = normalizeCustomStreamAddonUrl(input.value);
@@ -3463,13 +3496,19 @@
             list.appendChild(row);
         }
 
-        function createCustomCatalogAddonRow(value = "") {
+        function createCustomCatalogAddonRow(value = "", name = "") {
             const list = document.getElementById("customCatalogAddonsList");
             if (!list) return;
 
             const row = document.createElement("div");
-            row.className = "addon-stream-row";
+            row.className = "addon-stream-row custom-catalog-addon-row";
             row.innerHTML = `
+                <input
+                    type="text"
+                    class="custom-catalog-addon-name"
+                    placeholder="Nome addon"
+                    value="${escapeHtml(name)}"
+                >
                 <input
                     type="url"
                     class="custom-catalog-addon-input"
@@ -3480,12 +3519,14 @@
             `;
 
             const removeButton = row.querySelector(".addon-stream-remove");
+            const nameInput = row.querySelector(".custom-catalog-addon-name");
             const input = row.querySelector(".custom-catalog-addon-input");
             removeButton.addEventListener("click", () => {
                 row.remove();
                 ensureCustomCatalogAddonRow();
                 renderCustomCatalogAddonSummary();
             });
+            nameInput.addEventListener("input", renderCustomCatalogAddonSummary);
             input.addEventListener("input", renderCustomCatalogAddonSummary);
             input.addEventListener("blur", () => {
                 input.value = normalizeCustomCatalogAddonUrl(input.value);
@@ -3519,16 +3560,21 @@
 
             list.innerHTML = "";
             const normalizedValues = (Array.isArray(values) ? values : [])
-                .map(normalizeCustomStreamAddonUrl)
-                .filter(Boolean);
+                .map(value => typeof value === "string"
+                    ? { name: "", url: normalizeCustomStreamAddonUrl(value) }
+                    : {
+                        name: String(value && value.name || "").trim(),
+                        url: normalizeCustomStreamAddonUrl(value && value.url || "")
+                    })
+                .filter(entry => entry.url);
 
             if (normalizedValues.length === 0) {
-                createCustomStreamAddonRow("");
+                createCustomStreamAddonRow("", "");
                 renderCustomStreamAddonSummary();
                 return;
             }
 
-            normalizedValues.forEach(value => createCustomStreamAddonRow(value));
+            normalizedValues.forEach(entry => createCustomStreamAddonRow(entry.url, entry.name));
             renderCustomStreamAddonSummary();
         }
 
@@ -3538,16 +3584,21 @@
 
             list.innerHTML = "";
             const normalizedValues = (Array.isArray(values) ? values : [])
-                .map(normalizeCustomCatalogAddonUrl)
-                .filter(Boolean);
+                .map(value => typeof value === "string"
+                    ? { name: "", url: normalizeCustomCatalogAddonUrl(value) }
+                    : {
+                        name: String(value && value.name || "").trim(),
+                        url: normalizeCustomCatalogAddonUrl(value && value.url || "")
+                    })
+                .filter(entry => entry.url);
 
             if (normalizedValues.length === 0) {
-                createCustomCatalogAddonRow("");
+                createCustomCatalogAddonRow("", "");
                 renderCustomCatalogAddonSummary();
                 return;
             }
 
-            normalizedValues.forEach(value => createCustomCatalogAddonRow(value));
+            normalizedValues.forEach(entry => createCustomCatalogAddonRow(entry.url, entry.name));
             renderCustomCatalogAddonSummary();
         }
 
@@ -4162,8 +4213,8 @@
             const returnStreams = document.getElementById("returnStreams").checked;
             const easyProxyUrl = document.getElementById("easyProxyUrl").value.trim().replace(/\/+$/, "");
             const easyProxyPassword = document.getElementById("easyProxyPassword").value.trim();
-            const customStreamAddons = getCustomStreamAddonValues();
-            const customCatalogAddons = getCustomCatalogAddonValues();
+            const customStreamAddons = getCustomStreamAddonEntries();
+            const customCatalogAddons = getCustomCatalogAddonEntries();
 
             if (tmdbApiKey) config.tmdbApiKey = tmdbApiKey;
             if (!returnStreams) config.returnStreams = false;
@@ -4346,7 +4397,7 @@
         const addCustomCatalogAddonButton = document.getElementById("add-custom-catalog-addon-btn");
         if (addCustomCatalogAddonButton) {
             addCustomCatalogAddonButton.addEventListener("click", () => {
-                createCustomCatalogAddonRow("");
+                createCustomCatalogAddonRow("", "");
                 const inputs = getCustomCatalogAddonInputs();
                 const lastInput = inputs[inputs.length - 1];
                 if (lastInput) lastInput.focus();

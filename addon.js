@@ -328,6 +328,21 @@ function normalizeAddonManifestUrl(value) {
     }
 }
 
+function normalizeAddonEntry(entry) {
+    if (typeof entry === "string") {
+        const url = normalizeAddonManifestUrl(entry);
+        return url ? { name: "", url } : null;
+    }
+
+    if (!entry || typeof entry !== "object") return null;
+
+    const url = normalizeAddonManifestUrl(entry.url);
+    if (!url) return null;
+
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    return { name, url };
+}
+
 function getCustomStreamAddonManifestUrls(config = null) {
     const resolvedConfig = getRequestConfig(config);
     const rawValue = resolvedConfig.customStreamAddons;
@@ -335,9 +350,11 @@ function getCustomStreamAddonManifestUrls(config = null) {
         ? rawValue
         : (typeof rawValue === "string" ? rawValue.split(/\r?\n|,/) : []);
 
-    return [...new Set(values
-        .map(normalizeAddonManifestUrl)
-        .filter(Boolean))];
+    return [...new Map(values
+        .map(normalizeAddonEntry)
+        .filter(Boolean)
+        .map(entry => [entry.url, entry]))
+        .values()];
 }
 
 function getCustomCatalogAddonManifestUrls(config = null) {
@@ -347,9 +364,11 @@ function getCustomCatalogAddonManifestUrls(config = null) {
         ? rawValue
         : (typeof rawValue === "string" ? rawValue.split(/\r?\n|,/) : []);
 
-    return [...new Set(values
-        .map(normalizeAddonManifestUrl)
-        .filter(Boolean))];
+    return [...new Map(values
+        .map(normalizeAddonEntry)
+        .filter(Boolean)
+        .map(entry => [entry.url, entry]))
+        .values()];
 }
 
 function encodeExternalCatalogIdParts(parts = []) {
@@ -413,25 +432,25 @@ async function fetchAddonManifest(manifestUrl) {
 }
 
 async function getCustomCatalogProxyCatalogs(config = null) {
-    const manifestUrls = getCustomCatalogAddonManifestUrls(config);
-    if (manifestUrls.length === 0) return [];
+    const addonEntries = getCustomCatalogAddonManifestUrls(config);
+    if (addonEntries.length === 0) return [];
 
     const manifests = await Promise.all(
-        manifestUrls.map(async manifestUrl => ({
-            manifestUrl,
-            manifest: await fetchAddonManifest(manifestUrl)
+        addonEntries.map(async entry => ({
+            entry,
+            manifest: await fetchAddonManifest(entry.url)
         }))
     );
 
-    return manifests.flatMap(({ manifestUrl, manifest }, index) => {
+    return manifests.flatMap(({ entry, manifest }, index) => {
         const catalogs = Array.isArray(manifest && manifest.catalogs) ? manifest.catalogs : [];
-        const addonName = String(manifest && manifest.name || `Addon ${index + 1}`).trim();
+        const addonName = String(entry.name || manifest && manifest.name || `Addon ${index + 1}`).trim();
 
         return catalogs
             .filter(catalog => catalog && typeof catalog === "object" && catalog.id && catalog.type)
             .map(catalog => ({
                 ...catalog,
-                id: buildCustomCatalogProxyId(manifestUrl, catalog),
+                id: buildCustomCatalogProxyId(entry.url, catalog),
                 name: `${catalog.name || catalog.id} · ${addonName}`,
                 behaviorHints: {
                     ...(catalog.behaviorHints && typeof catalog.behaviorHints === "object" ? catalog.behaviorHints : {}),
@@ -516,7 +535,7 @@ async function fetchStreamsFromUrl(url) {
 async function fetchAggregatedStreams(type, id, config = null) {
     const streamUrls = [
         getEasyStreamsStreamUrl(type, id, config),
-        ...getCustomStreamAddonManifestUrls(config).map(manifestUrl => getCustomStreamAddonUrl(manifestUrl, type, id))
+        ...getCustomStreamAddonManifestUrls(config).map(entry => getCustomStreamAddonUrl(entry.url, type, id))
     ].filter(Boolean);
 
     if (streamUrls.length === 0) {
