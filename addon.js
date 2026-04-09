@@ -318,7 +318,7 @@ function normalizeAddonManifestUrl(value) {
 function normalizeAddonEntry(entry) {
     if (typeof entry === "string") {
         const url = normalizeAddonManifestUrl(entry);
-        return url ? { name: "", url } : null;
+        return url ? { name: "", url, metaSource: "addon" } : null;
     }
 
     if (!entry || typeof entry !== "object") return null;
@@ -327,7 +327,11 @@ function normalizeAddonEntry(entry) {
     if (!url) return null;
 
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
-    return { name, url };
+    const rawMetaSource = typeof entry.metaSource === "string"
+        ? entry.metaSource.trim().toLowerCase()
+        : "";
+    const metaSource = rawMetaSource === "easycatalogs" ? "easycatalogs" : "addon";
+    return { name, url, metaSource };
 }
 
 function getCustomStreamAddonManifestUrls(config = null) {
@@ -356,6 +360,15 @@ function getCustomCatalogAddonManifestUrls(config = null) {
         .filter(Boolean)
         .map(entry => [entry.url, entry]))
         .values()];
+}
+
+function getCustomCatalogAddonMetaSource(manifestUrl, config = null) {
+    const normalizedManifestUrl = normalizeAddonManifestUrl(manifestUrl);
+    if (!normalizedManifestUrl) return "addon";
+    const addonEntry = getCustomCatalogAddonManifestUrls(config).find(entry => entry.url === normalizedManifestUrl);
+    return addonEntry && addonEntry.metaSource === "easycatalogs"
+        ? "easycatalogs"
+        : "addon";
 }
 
 function encodeExternalCatalogIdParts(parts = []) {
@@ -461,6 +474,102 @@ function buildExternalCatalogUrl(manifestUrl, type, catalogId, extra = {}) {
     const encodedType = encodeURIComponent(String(type || "").trim());
     const encodedCatalogId = encodeURIComponent(String(catalogId || "").trim());
     return `${baseUrl}/catalog/${encodedType}/${encodedCatalogId}.json${query ? `?${query}` : ""}`;
+}
+
+function getCustomMetaImdbId(meta) {
+    if (!meta || typeof meta !== "object") return null;
+    return normalizeImdbId(
+        meta.imdb_id ||
+        meta.imdbId ||
+        meta.imdb ||
+        null
+    );
+}
+
+function getCustomMetaTmdbId(meta) {
+    if (!meta || typeof meta !== "object") return null;
+    const candidates = [
+        meta.tmdb_id,
+        meta.tmdbId,
+        meta.id
+    ];
+
+    for (const candidate of candidates) {
+        const extracted = extractTmdbNumericId(candidate);
+        if (extracted) return extracted;
+    }
+
+    return null;
+}
+
+function applyErdbToCustomCatalogMeta(meta, requestedType, config = null) {
+    if (!meta || typeof meta !== "object") return meta;
+    if (!getErdbConfig(config)) return meta;
+
+    const imdbId = getCustomMetaImdbId(meta);
+    const tmdbId = getCustomMetaTmdbId(meta);
+    const mediaType = String(meta.type || requestedType || "").trim().toLowerCase() === "series"
+        ? "series"
+        : "movie";
+    const mediaIdOverride = meta.id || null;
+
+    const configuredPosterUrl = getConfiguredAssetUrl(config, "poster", imdbId, tmdbId, mediaIdOverride, mediaType);
+    const configuredBackdropUrl = getConfiguredAssetUrl(config, "backdrop", imdbId, tmdbId, mediaIdOverride, mediaType);
+    const configuredLogoUrl = getConfiguredAssetUrl(config, "logo", imdbId, tmdbId, mediaIdOverride, mediaType);
+
+    if (configuredPosterUrl) meta.poster = configuredPosterUrl;
+    if (configuredBackdropUrl) meta.background = configuredBackdropUrl;
+    if (configuredLogoUrl) meta.logo = configuredLogoUrl;
+
+    return meta;
+}
+
+function applyErdbToCustomCatalogMetas(metas, requestedType, config = null) {
+    if (!Array.isArray(metas) || metas.length === 0) return [];
+    if (!getErdbConfig(config)) return metas;
+    return metas.map(meta => applyErdbToCustomCatalogMeta(meta, requestedType, config));
+}
+
+function resolveEasyCatalogMetaIdFromCustomMeta(meta) {
+    if (!meta || typeof meta !== "object") return null;
+
+    const imdbId = getCustomMetaImdbId(meta);
+    if (imdbId) return imdbId;
+
+    if (typeof meta.id === "string" && meta.id.trim().toLowerCase().startsWith("kitsu:")) {
+        return meta.id.trim();
+    }
+
+    const tmdbId = getCustomMetaTmdbId(meta);
+    if (tmdbId) return tmdbId;
+
+    return null;
+}
+
+async function forceEasyCatalogMetasForCustomCatalog(metas, requestedType, config = null) {
+    if (!Array.isArray(metas) || metas.length === 0) return [];
+
+    const transformedMetas = await mapWithConcurrency(metas, 6, async (meta) => {
+        if (!meta || typeof meta !== "object") return meta;
+
+        const candidateType = String(meta.type || requestedType || "").trim().toLowerCase();
+        const targetType = candidateType === "series" ? "series" : "movie";
+        const metaId = resolveEasyCatalogMetaIdFromCustomMeta(meta);
+        if (!metaId) return meta;
+
+        const easyMeta = await getCachedMetaForId(targetType, metaId, config);
+        if (!easyMeta || typeof easyMeta !== "object") return meta;
+
+        return {
+            ...easyMeta,
+            behaviorHints: {
+                ...(easyMeta.behaviorHints && typeof easyMeta.behaviorHints === "object" ? easyMeta.behaviorHints : {}),
+                ...(meta.behaviorHints && typeof meta.behaviorHints === "object" ? meta.behaviorHints : {})
+            }
+        };
+    });
+
+    return transformedMetas.filter(Boolean);
 }
 
 function getCustomStreamAddonUrl(manifestUrl, type, id) {
@@ -5918,7 +6027,13 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             }
 
             const payload = await response.json();
-            return { metas: Array.isArray(payload && payload.metas) ? payload.metas : [] };
+            const externalMetas = Array.isArray(payload && payload.metas) ? payload.metas : [];
+            const metaSource = getCustomCatalogAddonMetaSource(customCatalogProxy.manifestUrl, config);
+            const sourceMetas = metaSource === "easycatalogs"
+                ? await forceEasyCatalogMetasForCustomCatalog(externalMetas, type, config)
+                : externalMetas;
+            const erdbMetas = applyErdbToCustomCatalogMetas(sourceMetas, type, config);
+            return { metas: erdbMetas };
         }
 
         if (isKitsuCatalogId(sourceCatalogId)) {

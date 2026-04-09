@@ -3319,6 +3319,11 @@
             return normalizeCustomStreamAddonUrl(value);
         }
 
+        function normalizeCustomCatalogMetaSource(value) {
+            const normalized = String(value || "").trim().toLowerCase();
+            return normalized === "easycatalogs" ? "easycatalogs" : "addon";
+        }
+
         async function loadCustomCatalogDefinitions() {
             const addonEntries = getCustomCatalogAddonEntries();
             const manifestUrls = addonEntries.map(entry => entry.url);
@@ -3393,7 +3398,8 @@
             return getCustomCatalogAddonRows()
                 .map(row => ({
                     name: String(row.querySelector(".custom-catalog-addon-name")?.value || "").trim(),
-                    url: normalizeCustomCatalogAddonUrl(row.querySelector(".custom-catalog-addon-input")?.value || "")
+                    url: normalizeCustomCatalogAddonUrl(row.querySelector(".custom-catalog-addon-input")?.value || ""),
+                    metaSource: normalizeCustomCatalogMetaSource(row.querySelector(".custom-catalog-addon-meta-source")?.value || "addon")
                 }))
                 .filter(entry => entry.url);
         }
@@ -3496,10 +3502,11 @@
             list.appendChild(row);
         }
 
-        function createCustomCatalogAddonRow(value = "", name = "") {
+        function createCustomCatalogAddonRow(value = "", name = "", metaSource = "addon") {
             const list = document.getElementById("customCatalogAddonsList");
             if (!list) return;
 
+            const normalizedMetaSource = normalizeCustomCatalogMetaSource(metaSource);
             const row = document.createElement("div");
             row.className = "addon-stream-row custom-catalog-addon-row";
             row.innerHTML = `
@@ -3515,12 +3522,17 @@
                     placeholder="https://addon.example.com/manifest.json"
                     value="${escapeHtml(value)}"
                 >
+                <select class="custom-catalog-addon-meta-source" aria-label="Sorgente metadati catalogo custom">
+                    <option value="addon" ${normalizedMetaSource === "addon" ? "selected" : ""}>Meta addon</option>
+                    <option value="easycatalogs" ${normalizedMetaSource === "easycatalogs" ? "selected" : ""}>Forza meta EasyCatalogs</option>
+                </select>
                 <button type="button" class="catalog-action-btn addon-stream-remove" aria-label="Rimuovi addon cataloghi">Rimuovi</button>
             `;
 
             const removeButton = row.querySelector(".addon-stream-remove");
             const nameInput = row.querySelector(".custom-catalog-addon-name");
             const input = row.querySelector(".custom-catalog-addon-input");
+            const metaSourceInput = row.querySelector(".custom-catalog-addon-meta-source");
             removeButton.addEventListener("click", () => {
                 row.remove();
                 ensureCustomCatalogAddonRow();
@@ -3528,6 +3540,7 @@
             });
             nameInput.addEventListener("input", renderCustomCatalogAddonSummary);
             input.addEventListener("input", renderCustomCatalogAddonSummary);
+            metaSourceInput.addEventListener("change", renderCustomCatalogAddonSummary);
             input.addEventListener("blur", () => {
                 input.value = normalizeCustomCatalogAddonUrl(input.value);
                 renderCustomCatalogAddonSummary();
@@ -3550,7 +3563,7 @@
             if (!list) return;
 
             if (list.children.length === 0) {
-                createCustomCatalogAddonRow("");
+                createCustomCatalogAddonRow("", "", "addon");
             }
         }
 
@@ -3585,20 +3598,21 @@
             list.innerHTML = "";
             const normalizedValues = (Array.isArray(values) ? values : [])
                 .map(value => typeof value === "string"
-                    ? { name: "", url: normalizeCustomCatalogAddonUrl(value) }
+                    ? { name: "", url: normalizeCustomCatalogAddonUrl(value), metaSource: "addon" }
                     : {
                         name: String(value && value.name || "").trim(),
-                        url: normalizeCustomCatalogAddonUrl(value && value.url || "")
+                        url: normalizeCustomCatalogAddonUrl(value && value.url || ""),
+                        metaSource: normalizeCustomCatalogMetaSource(value && value.metaSource || "addon")
                     })
                 .filter(entry => entry.url);
 
             if (normalizedValues.length === 0) {
-                createCustomCatalogAddonRow("", "");
+                createCustomCatalogAddonRow("", "", "addon");
                 renderCustomCatalogAddonSummary();
                 return;
             }
 
-            normalizedValues.forEach(entry => createCustomCatalogAddonRow(entry.url, entry.name));
+            normalizedValues.forEach(entry => createCustomCatalogAddonRow(entry.url, entry.name, entry.metaSource));
             renderCustomCatalogAddonSummary();
         }
 
@@ -4397,7 +4411,7 @@
         const addCustomCatalogAddonButton = document.getElementById("add-custom-catalog-addon-btn");
         if (addCustomCatalogAddonButton) {
             addCustomCatalogAddonButton.addEventListener("click", () => {
-                createCustomCatalogAddonRow("", "");
+                createCustomCatalogAddonRow("", "", "addon");
                 const inputs = getCustomCatalogAddonInputs();
                 const lastInput = inputs[inputs.length - 1];
                 if (lastInput) lastInput.focus();
