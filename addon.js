@@ -110,9 +110,31 @@ function normalizeExtraIdList(rawValue) {
 }
 
 function parseVideoReleaseTimestamp(video) {
-    if (!video || !video.released) return null;
-    const timestamp = Date.parse(video.released);
+    if (!video) return null;
+    const releaseValue = video.firstAired || video.released;
+    if (!releaseValue) return null;
+    const timestamp = Date.parse(releaseValue);
     return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildCanonicalEpisodeVideo(baseVideo) {
+    if (!baseVideo || typeof baseVideo !== "object") return baseVideo;
+
+    const episodeNumber = Number.parseInt(String(baseVideo.episode || baseVideo.number || ""), 10);
+    const released = baseVideo.firstAired || baseVideo.released || undefined;
+    const title = baseVideo.name || baseVideo.title || undefined;
+    const overview = baseVideo.description || baseVideo.overview || undefined;
+
+    return {
+        ...baseVideo,
+        title,
+        name: title,
+        released,
+        firstAired: released,
+        overview,
+        description: overview,
+        number: Number.isFinite(episodeNumber) ? episodeNumber : undefined
+    };
 }
 
 function compareVideosByRelease(left, right) {
@@ -3858,7 +3880,7 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
 
-            videos.push({
+            videos.push(buildCanonicalEpisodeVideo({
                 id: `${primaryMediaId}:${episode.season_number}:${episodeNumber}`,
                 title: episode.name,
                 released,
@@ -3866,7 +3888,7 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
                 overview: episode.overview,
                 season: episode.season_number,
                 episode: episodeNumber
-            });
+            }));
         });
     });
 
@@ -3941,7 +3963,7 @@ function buildTmdbSeriesVideosFromEpisodeGroup(item, episodeGroupDetails, cineme
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
 
-            videos.push({
+            videos.push(buildCanonicalEpisodeVideo({
                 id: `${primaryMediaId}:${seasonNumber}:${episodeNumber}`,
                 title: (episode && episode.name) || `Episode ${episodeNumber}`,
                 released,
@@ -3949,7 +3971,7 @@ function buildTmdbSeriesVideosFromEpisodeGroup(item, episodeGroupDetails, cineme
                 overview: episode && episode.overview ? episode.overview : undefined,
                 season: seasonNumber,
                 episode: episodeNumber
-            });
+            }));
         });
     });
 
@@ -4372,7 +4394,7 @@ function buildKitsuEpisodeVideos(kitsuId, episodes, fallbackEpisodeCount = 0, co
 
     normalizedEpisodes.sort((a, b) => a.number - b.number);
 
-    return normalizedEpisodes.map(episode => ({
+    return normalizedEpisodes.map(episode => buildCanonicalEpisodeVideo({
         id: `kitsu:${normalizedKitsuId}:${episode.number}`,
         title: episode.title,
         season: 1,
@@ -4460,7 +4482,7 @@ async function enrichKitsuEpisodeVideosWithAnimeMapping(kitsuId, videos, tmdbDet
             : null;
         const tmdbReleased = tmdbEpisode && tmdbEpisode.air_date ? safeToIsoString(tmdbEpisode.air_date) : null;
 
-        return {
+        return buildCanonicalEpisodeVideo({
             ...video,
             title: /^episodio\s+\d+$/i.test(String(video.title || "")) && tmdbEpisode && tmdbEpisode.name
                 ? tmdbEpisode.name
@@ -4468,7 +4490,7 @@ async function enrichKitsuEpisodeVideosWithAnimeMapping(kitsuId, videos, tmdbDet
             released: video.released || tmdbReleased || undefined,
             thumbnail: configuredThumbnailUrl || tmdbThumbnail || video.thumbnail,
             overview: (tmdbEpisode && tmdbEpisode.overview) || video.overview || undefined
-        };
+        });
     });
 }
 
