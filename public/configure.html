@@ -3660,7 +3660,7 @@
                 .filter(Boolean);
             setAnimeSource(resolveAnimeSource(resolvedConfig, configuredCatalogs), { render: false });
 
-            const configuredOrder = { standard: [], top10: [], anime: [] };
+            const configuredOrder = { standard: [], top10: [], anime: [], custom: [] };
             const configuredSelectedOrder = [];
 
             configuredCatalogs.forEach(entry => {
@@ -3716,8 +3716,8 @@
 
             Object.keys(sortOrders).forEach(section => {
                 sortOrders[section] = [
-                    ...configuredOrder[section],
-                    ...sortOrders[section].filter(id => !configuredOrder[section].includes(id))
+                    ...(configuredOrder[section] || []),
+                    ...sortOrders[section].filter(id => !(configuredOrder[section] || []).includes(id))
                 ];
             });
 
