@@ -21,14 +21,6 @@ const NEGATIVE_CACHE_MARKER = "__negative_cache__";
 const TOP10_GLOBAL_CATALOG_ID = "top10_italia";
 const TOP10_MOVIE_CONFIG_ID = "top10_italia_movie";
 const TOP10_SERIES_CONFIG_ID = "top10_italia_series";
-const LAST_VIDEOS_CATALOG_ID = "lastVideosIds";
-const CALENDAR_VIDEOS_CATALOG_ID = "calendarVideosIds";
-const CINEMETA_LAST_VIDEOS_CATALOG_ID = "last-videos";
-const CINEMETA_CALENDAR_VIDEOS_CATALOG_ID = "calendar-videos";
-const LAST_VIDEOS_EXTRA_NAME = "lastVideosIds";
-const CALENDAR_VIDEOS_EXTRA_NAME = "calendarVideosIds";
-const LAST_VIDEOS_ITEMS_LIMIT = 20;
-const CALENDAR_VIDEOS_ITEMS_LIMIT = 10;
 const HOME_TMDB_MAX_PAGES = Number.parseInt(process.env.TMDB_HOME_MAX_PAGES || "20", 10);
 const HOME_TMDB_PAGE_CAP = Number.isFinite(HOME_TMDB_MAX_PAGES) && HOME_TMDB_MAX_PAGES > 0
     ? HOME_TMDB_MAX_PAGES
@@ -63,58 +55,6 @@ async function fetchCinemetaMeta(imdbId, type) {
 async function getImdbRating(imdbId, type) {
     const cinemetaMeta = await fetchCinemetaMeta(imdbId, type);
     return cinemetaMeta && cinemetaMeta.imdbRating ? cinemetaMeta.imdbRating : null;
-}
-
-async function fetchCinemetaSpecialSeriesCatalogMetas(catalogId, requestedIds) {
-    const normalizedIds = normalizeExtraIdList(requestedIds).slice(0, 100);
-    if (normalizedIds.length === 0) return [];
-
-    const normalizedCatalogId = catalogId === CALENDAR_VIDEOS_CATALOG_ID || catalogId === CINEMETA_CALENDAR_VIDEOS_CATALOG_ID
-        ? CINEMETA_CALENDAR_VIDEOS_CATALOG_ID
-        : CINEMETA_LAST_VIDEOS_CATALOG_ID;
-    const extraName = normalizedCatalogId === CINEMETA_CALENDAR_VIDEOS_CATALOG_ID
-        ? CALENDAR_VIDEOS_EXTRA_NAME
-        : LAST_VIDEOS_EXTRA_NAME;
-
-    try {
-        const response = await fetch(`https://v3-cinemeta.strem.io/catalog/series/${normalizedCatalogId}/${extraName}=${encodeURIComponent(normalizedIds.join(","))}.json`);
-        const payload = await response.json();
-        if (payload && Array.isArray(payload.metasDetailed)) {
-            return payload.metasDetailed;
-        }
-        if (payload && Array.isArray(payload.metas)) {
-            return payload.metas;
-        }
-    } catch (error) {
-        console.warn(`[Easy Catalogs] Error fetching Cinemeta ${normalizedCatalogId}: ${error.message}`);
-    }
-
-    return [];
-}
-
-function pickVideosByReferenceIds(videos, referenceVideos, fallbackCatalogId) {
-    const availableVideos = Array.isArray(videos) ? videos : [];
-    const requestedReferenceVideos = Array.isArray(referenceVideos) ? referenceVideos : [];
-    if (availableVideos.length === 0) return [];
-
-    if (requestedReferenceVideos.length === 0) {
-        return selectSeriesVideosForSpecialCatalog(availableVideos, fallbackCatalogId);
-    }
-
-    const videoById = new Map(
-        availableVideos
-            .filter(video => video && typeof video === "object" && String(video.id || "").trim())
-            .map(video => [String(video.id), video])
-    );
-
-    const selected = [];
-    requestedReferenceVideos.forEach(referenceVideo => {
-        const referenceId = String(referenceVideo && referenceVideo.id || "").trim();
-        if (!referenceId || !videoById.has(referenceId)) return;
-        selected.push(videoById.get(referenceId));
-    });
-
-    return selected.length > 0 ? selected : selectSeriesVideosForSpecialCatalog(availableVideos, fallbackCatalogId);
 }
 
 function normalizeImdbId(imdbId) {
@@ -223,43 +163,6 @@ function compareVideosByRelease(left, right) {
     return String(left && left.id || "").localeCompare(String(right && right.id || ""));
 }
 
-function getOrderedSeriesVideos(videos) {
-    return (Array.isArray(videos) ? videos : [])
-        .filter(video => video && typeof video === "object" && String(video.id || "").trim())
-        .sort(compareVideosByRelease);
-}
-
-function isStandardEpisodeVideo(video) {
-    const seasonNumber = Number.parseInt(String(video && video.season || ""), 10);
-    return !Number.isFinite(seasonNumber) || seasonNumber > 0;
-}
-
-function selectSeriesVideosForSpecialCatalog(videos, catalogId) {
-    const orderedVideos = getOrderedSeriesVideos(videos);
-    if (orderedVideos.length === 0) return [];
-
-    if (catalogId === LAST_VIDEOS_CATALOG_ID || catalogId === CINEMETA_LAST_VIDEOS_CATALOG_ID) {
-        const now = Date.now();
-        const standardEpisodes = orderedVideos.filter(isStandardEpisodeVideo);
-        const airedStandardEpisodes = standardEpisodes.filter(video => {
-            const releasedAt = parseVideoReleaseTimestamp(video);
-            return releasedAt !== null && releasedAt <= now;
-        });
-        const selectedPool = airedStandardEpisodes.length > 0
-            ? airedStandardEpisodes
-            : (standardEpisodes.length > 0 ? standardEpisodes : orderedVideos);
-        return selectedPool.slice(-LAST_VIDEOS_ITEMS_LIMIT);
-    }
-
-    if (catalogId === CALENDAR_VIDEOS_CATALOG_ID || catalogId === CINEMETA_CALENDAR_VIDEOS_CATALOG_ID) {
-        const datedVideos = orderedVideos.filter(video => parseVideoReleaseTimestamp(video) !== null);
-        const selectedPool = datedVideos.length > 0 ? datedVideos : orderedVideos;
-        return selectedPool.slice(-CALENDAR_VIDEOS_ITEMS_LIMIT);
-    }
-
-    return orderedVideos;
-}
-
 function alignMetaIdentity(meta, requestedId) {
     if (!meta || !requestedId || meta.id === requestedId) return meta;
 
@@ -307,13 +210,6 @@ function shouldReturnStreams(config = null) {
     }
 
     return true;
-}
-
-function isSpecialSeriesCatalogId(catalogId) {
-    return catalogId === LAST_VIDEOS_CATALOG_ID ||
-        catalogId === CALENDAR_VIDEOS_CATALOG_ID ||
-        catalogId === CINEMETA_LAST_VIDEOS_CATALOG_ID ||
-        catalogId === CINEMETA_CALENDAR_VIDEOS_CATALOG_ID;
 }
 
 function normalizeEasyProxyUrl(value) {
@@ -5259,8 +5155,7 @@ const manifest = {
     name: "Easy Catalogs",
     description: "Easy Catalogs per Stremio",
     behaviorHints: {
-        configurable: true,
-        newEpisodeNotifications: true
+        configurable: true
     },
     resources: [
         "catalog",
@@ -5409,26 +5304,6 @@ const fullCatalogs = [
         name: "Ricerca TMDB",
         extra: [{ name: "search", isRequired: true }]
     },
-    {
-        type: "series",
-        id: LAST_VIDEOS_CATALOG_ID,
-        name: "Last videos",
-        extra: [{
-            name: LAST_VIDEOS_EXTRA_NAME,
-            isRequired: true,
-            optionsLimit: 100
-        }]
-    },
-    {
-        type: "series",
-        id: CALENDAR_VIDEOS_CATALOG_ID,
-        name: "Calendar videos",
-        extra: [{
-            name: CALENDAR_VIDEOS_EXTRA_NAME,
-            isRequired: true,
-            optionsLimit: 100
-        }]
-    }
 ];
 
 // Add Provider Catalogs dynamically to fullCatalogs
@@ -5731,48 +5606,6 @@ async function getCachedMetaForId(type, id, config = null) {
     return null;
 }
 
-async function fetchSpecialSeriesCatalogMetas(catalogId, extra = {}, config = null) {
-    const extraName = (catalogId === LAST_VIDEOS_CATALOG_ID || catalogId === CINEMETA_LAST_VIDEOS_CATALOG_ID)
-        ? LAST_VIDEOS_EXTRA_NAME
-        : ((catalogId === CALENDAR_VIDEOS_CATALOG_ID || catalogId === CINEMETA_CALENDAR_VIDEOS_CATALOG_ID)
-            ? CALENDAR_VIDEOS_EXTRA_NAME
-            : "");
-    if (!extraName) return [];
-
-    const requestedIds = normalizeExtraIdList(extra && extra[extraName]).slice(0, 100);
-    if (requestedIds.length === 0) return [];
-
-    const cinemetaMetas = await fetchCinemetaSpecialSeriesCatalogMetas(catalogId, requestedIds);
-    const cinemetaMetaMap = new Map(
-        cinemetaMetas
-            .filter(meta => meta && typeof meta === "object" && String(meta.id || "").trim())
-            .map(meta => [String(meta.id), meta])
-    );
-
-    const metas = await mapWithConcurrency(requestedIds, 4, async seriesId => {
-        const cachedMeta = await getCachedMetaForId("series", seriesId, config);
-        if (!cachedMeta || !Array.isArray(cachedMeta.videos) || cachedMeta.videos.length === 0) {
-            return null;
-        }
-
-        const alignedMeta = alignMetaIdentity(cachedMeta, seriesId);
-        const cinemetaMeta = cinemetaMetaMap.get(seriesId);
-        const selectedVideos = pickVideosByReferenceIds(
-            alignedMeta.videos,
-            cinemetaMeta && Array.isArray(cinemetaMeta.videos) ? cinemetaMeta.videos : [],
-            catalogId
-        );
-        if (selectedVideos.length === 0) return null;
-
-        return {
-            ...alignedMeta,
-            videos: selectedVideos
-        };
-    });
-
-    return metas.filter(Boolean);
-}
-
 // Metadata Handler
 builder.defineMetaHandler(async ({ type, id }) => {
     console.log(`[Easy Catalogs] Meta Request: type=${type} id=${id}`);
@@ -6039,11 +5872,6 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         if (isTop10CatalogId(sourceCatalogId)) {
             const metas = await fetchTop10CatalogMetas(sourceCatalogId, type, resolvedExtra, config);
             return { metas: applyLandscapeToMetas(metas, landscapeForCatalog, config) };
-        }
-
-        if (type === "series" && isSpecialSeriesCatalogId(sourceCatalogId)) {
-            const metasDetailed = await fetchSpecialSeriesCatalogMetas(sourceCatalogId, resolvedExtra, config);
-            return { metasDetailed };
         }
 
         let endpoint = null;
@@ -6698,13 +6526,6 @@ app.get('/manifest.json', async (req, res) => {
         // Default: Show all
         filteredCatalogs = fullCatalogs;
     }
-
-    [LAST_VIDEOS_CATALOG_ID, CALENDAR_VIDEOS_CATALOG_ID].forEach(catalogId => {
-        const specialCatalog = fullCatalogs.find(catalog => catalog.id === catalogId && catalog.type === "series");
-        if (specialCatalog) {
-            filteredCatalogs.push(specialCatalog);
-        }
-    });
 
     // Deduplicate just in case
     filteredCatalogs = [...new Set(filteredCatalogs)];
