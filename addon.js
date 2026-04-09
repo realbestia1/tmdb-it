@@ -72,6 +72,16 @@ function normalizeImdbId(imdbId) {
     return imdbStr.toLowerCase().startsWith("tt") ? imdbStr : `tt${imdbStr}`;
 }
 
+function slugify(value) {
+    return String(value || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-{2,}/g, "-");
+}
+
 function getPrimaryMediaId(imdbId, tmdbId) {
     const normalizedImdbId = normalizeImdbId(imdbId);
     return normalizedImdbId || `tmdb:${tmdbId}`;
@@ -4563,6 +4573,9 @@ function buildKitsuMetaFromPayload(kitsuId, payload, requestedType, config = nul
 
     const meta = {
         id: metaId,
+        imdb_id: assetImdbId || undefined,
+        moviedb_id: assetTmdbId || undefined,
+        slug: `${type}/${slugify(getKitsuPreferredTitle(attributes, config) || `kitsu ${normalizedKitsuId}`)}-${normalizedKitsuId}`,
         type,
         name: getKitsuPreferredTitle(attributes, config) || `Kitsu ${normalizedKitsuId}`,
         poster: poster || undefined,
@@ -4573,6 +4586,7 @@ function buildKitsuMetaFromPayload(kitsuId, payload, requestedType, config = nul
         released: safeToIsoString(attributes.startDate),
         year: releaseInfo || undefined,
         imdbRating: attributes.averageRating ? (parseFloat(attributes.averageRating) / 10).toFixed(1) : null,
+        genre: getKitsuCategories(payload),
         runtime: attributes.episodeLength
             ? `${attributes.episodeLength} min`
             : (attributes.totalLength ? `${attributes.totalLength} min` : null),
@@ -5787,6 +5801,9 @@ async function transformToMeta(item, type, config = null, options = {}) {
 
     return {
         id: primaryMediaId,
+        imdb_id: imdbId || undefined,
+        moviedb_id: item.id || undefined,
+        slug: `${type}/${slugify(getPreferredTmdbTitle(item, type) || item.title || item.name || item.id)}-${String(primaryMediaId).replace(/^tt/i, "")}`,
         type: type,
         name: getPreferredTmdbTitle(item, type),
         poster: poster,
@@ -5797,6 +5814,7 @@ async function transformToMeta(item, type, config = null, options = {}) {
         released: exactReleaseDate ? new Date(exactReleaseDate).toISOString() : null,
         year: year,
         imdbRating: fetchedImdbRating || (item.vote_average !== undefined ? item.vote_average.toFixed(1) : null),
+        genre: item.genres ? item.genres.map(g => g.name) : [],
         genres: item.genres ? item.genres.map(g => g.name) : [],
         cast: item.credits && item.credits.cast ? item.credits.cast.slice(0, 10).map(c => c.name) : [],
         director: [
