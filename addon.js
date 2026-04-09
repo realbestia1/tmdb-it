@@ -2990,11 +2990,7 @@ async function searchTmdbByTitleCandidate(typePath, query, expectedYear = null, 
 async function resolveTmdbIdFromTop10Entry(entry, requestedType, config = null) {
     const expectedYear = getYearFromValue(entry && entry.year);
     const slugTitle = getTitleFromSlugPath(entry && entry.fullPath);
-    const titleCandidates = uniqueNonEmptyStrings([
-        entry && entry.title,
-        slugTitle
-    ]);
-
+    const cacheKey = titleCandidates.length > 0
         ? `top10:tmdb-lookup:v2:${requestedType}:${normalizeMatchTitle(titleCandidates[0])}:${expectedYear || ""}:${normalizeMatchTitle(slugTitle)}`
         : null;
 
