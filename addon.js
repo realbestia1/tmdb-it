@@ -5466,7 +5466,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
 function getMetaCacheKey(type, id, config = null) {
     const resolvedConfig = getRequestConfig(config);
     const configHash = Object.keys(resolvedConfig).length > 0 ? JSON.stringify(resolvedConfig) : "default";
-    return `meta_v23${type}:${id}:${configHash}`;
+    return `meta_v24${type}:${id}:${configHash}`;
 }
 
 async function buildMetaForId(type, id, config = null) {
