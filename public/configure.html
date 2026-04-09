@@ -965,6 +965,15 @@
             background: rgba(255, 255, 255, 0.02);
         }
 
+        #erdbSettings {
+            width: 100%;
+            margin-top: 0.7rem;
+            padding: 0.85rem;
+            border-radius: 0.8rem;
+            border: 1px dashed var(--border-color);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
         .nested-settings-title {
             font-size: 0.82rem;
             text-transform: uppercase;
@@ -1913,7 +1922,8 @@
                                     token.
                                     <a href="https://easyratingsdb.com" target="_blank" rel="noopener">Apri ERDB</a>
                                 </div>
-                            </div>
+                                <div id="erdbSettings" style="display: none;">
+                                    <div class="nested-settings-title">Impostazioni ERDB</div>
                             <div class="input-group" id="erdbBaseUrlGroup" style="margin-top: 1rem; display: none;">
                                 <label for="erdbBaseUrl">ERDB Base URL (opzionale)</label>
                                 <input type="text" id="erdbBaseUrl" placeholder="https://easyratingsdb.com">
@@ -1965,6 +1975,8 @@
                                     </label>
                                 </div>
                                 <div class="input-hint">Se un tipo è disattivato, l'addon mantiene l'artwork originale.
+                                </div>
+                            </div>
                                 </div>
                             </div>
                             <div class="input-group" style="margin-top: 1rem;">
@@ -2546,8 +2558,10 @@
             const erdbTokenInput = document.getElementById('erdbToken');
             const toggles = document.getElementById('erdbTypeToggles');
             const erdbBaseUrlGroup = document.getElementById('erdbBaseUrlGroup');
-            if (!erdbTokenInput || !toggles || !erdbBaseUrlGroup) return;
+            const erdbSettings = document.getElementById('erdbSettings');
+            if (!erdbTokenInput || !toggles || !erdbBaseUrlGroup || !erdbSettings) return;
             const hasValue = !!erdbTokenInput.value.trim() || !!document.body.dataset.legacyErdbConfig;
+            erdbSettings.style.display = hasValue ? '' : 'none';
             erdbBaseUrlGroup.style.display = hasValue ? '' : 'none';
             toggles.style.display = hasValue ? '' : 'none';
         }
