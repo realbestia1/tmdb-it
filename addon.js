@@ -5150,11 +5150,10 @@ const PROVIDERS_SERIES_ONLY = new Set(["Discovery+"]);
 
 const manifest = {
     id: "org.bestia.easycatalogs",
-    version: "1.1.1",
+    version: "1.1.2",
     name: "Easy Catalogs",
     description: "Easy Catalogs per Stremio",
     behaviorHints: {
-        configurable: true,
         newEpisodeNotifications: true
     },
     resources: [
@@ -6514,7 +6513,9 @@ app.get('/manifest.json', async (req, res) => {
                 'anime_popular_movie': 'kitsu.movie.popular',
                 'anime_ova': 'kitsu.series.ova',
                 'anime_ona': 'kitsu.series.ona',
-                'anime_special': 'kitsu.series.special'
+                'anime_special': 'kitsu.series.special',
+                'last_videos': LAST_VIDEOS_CATALOG_ID,
+                'calendar_videos': CALENDAR_VIDEOS_CATALOG_ID
             };
 
             if (lookupKey === TOP10_GLOBAL_CATALOG_ID) {
