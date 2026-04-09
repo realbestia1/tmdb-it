@@ -5150,7 +5150,7 @@ const PROVIDERS_SERIES_ONLY = new Set(["Discovery+"]);
 
 const manifest = {
     id: "org.bestia.easycatalogs",
-    version: "1.0.56",
+    version: "1.1.0",
     name: "Easy Catalogs",
     description: "Easy Catalogs per Stremio",
     behaviorHints: {
