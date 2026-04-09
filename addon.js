@@ -2557,7 +2557,7 @@ async function fetchTop10ChartEntriesFromGraphql(options = {}) {
     const objectType = String(options.objectType || "").trim().toUpperCase();
     if (!objectType) return [];
 
-    const cacheKey = `top10:graphql:v1:${objectType}:${TOP10_SOURCE_COUNTRY}`;
+    const cacheKey = `top10:graphql:v2:${objectType}:${TOP10_SOURCE_COUNTRY}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -2666,7 +2666,7 @@ async function fetchTop10PopularEntriesFromGraphql(options = {}) {
     const packages = uniqueNonEmptyStrings(options.packages || []);
     if (!objectType || packages.length === 0) return [];
 
-    const cacheKey = `top10:graphql:popular:v1:${objectType}:${TOP10_SOURCE_COUNTRY}:${packages.join(",")}`;
+    const cacheKey = `top10:graphql:popular:v2:${objectType}:${TOP10_SOURCE_COUNTRY}:${packages.join(",")}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -2771,7 +2771,7 @@ async function fetchTop10ChartEntriesFromPage(pageUrl, options = {}) {
     const requiresPackages = options.requiresPackages === true;
     if (!pageUrl || !objectType) return [];
 
-    const cacheKey = `top10:charts:v1:${requiresPackages ? "provider" : "global"}:${objectType}:${pageUrl}`;
+    const cacheKey = `top10:charts:v2:${requiresPackages ? "provider" : "global"}:${objectType}:${pageUrl}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -2791,7 +2791,7 @@ async function fetchTop10ChartEntriesFromPage(pageUrl, options = {}) {
             const packages = extractTop10PackagesFromPopularTitles(state);
             if (response.ok && packages.length > 0) {
                 await cache.set(
-                    `top10:provider-packages:v1:${pageUrl}`,
+                    `top10:provider-packages:v2:${pageUrl}`,
                     packages,
                     withTtlJitter(CACHE_TTL_SECONDS.top10)
                 );
@@ -2813,7 +2813,7 @@ async function fetchTop10ChartEntriesFromPage(pageUrl, options = {}) {
 async function fetchTop10ProviderPackagesFromPage(pageUrl) {
     if (!pageUrl) return [];
 
-    const cacheKey = `top10:provider-packages:v1:${pageUrl}`;
+    const cacheKey = `top10:provider-packages:v2:${pageUrl}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (Array.isArray(cached)) return cached;
@@ -2853,7 +2853,7 @@ async function fetchTop10ExternalIdsFromPage(fullPath, jwId) {
     const pageUrl = buildTop10PageUrl(fullPath);
     if (!pageUrl) return { imdbId: null, tmdbId: null };
 
-    const cacheKey = `top10:externalids:v1:${jwId || fullPath}`;
+    const cacheKey = `top10:externalids:v2:${jwId || fullPath}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return { imdbId: null, tmdbId: null };
     if (cached && typeof cached === "object") {
@@ -2995,8 +2995,7 @@ async function resolveTmdbIdFromTop10Entry(entry, requestedType, config = null) 
         slugTitle
     ]);
 
-    const cacheKey = titleCandidates.length > 0
-        ? `top10:tmdb-lookup:v1:${requestedType}:${normalizeMatchTitle(titleCandidates[0])}:${expectedYear || ""}:${normalizeMatchTitle(slugTitle)}`
+        ? `top10:tmdb-lookup:v2:${requestedType}:${normalizeMatchTitle(titleCandidates[0])}:${expectedYear || ""}:${normalizeMatchTitle(slugTitle)}`
         : null;
 
     const directTmdbId = normalizeTop10TmdbId(entry && entry.tmdbId);
@@ -3101,7 +3100,7 @@ async function fetchTop10CatalogMetas(catalogId, requestedType, extra = {}, conf
     const configHash = config && typeof config === "object" && Object.keys(config).length > 0
         ? JSON.stringify(config)
         : "default";
-    const cacheKey = `top10:catalog:v7:${normalizedCatalogId}:${requestedType}:${configHash}`;
+    const cacheKey = `top10:catalog:v8:${normalizedCatalogId}:${requestedType}:${configHash}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -3925,7 +3924,7 @@ async function fetchKitsuAnimeById(kitsuId) {
     const normalizedKitsuId = normalizeKitsuId(kitsuId);
     if (!normalizedKitsuId) return null;
 
-    const cacheKey = `kitsu:anime:v2:${normalizedKitsuId}`;
+    const cacheKey = `kitsu:anime:v3:${normalizedKitsuId}`;
     let cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return null;
     if (cached) {
@@ -4827,7 +4826,7 @@ async function fetchKitsuCatalogMetas(catalogId, requestedType, extra = {}, conf
     const erdbTypesKey = resolvedConfig.erdbTypes && typeof resolvedConfig.erdbTypes === "object"
         ? resolvedConfig.erdbTypes
         : {};
-    const cacheKey = `kitsu:catalog:v23:${normalizedCatalogId}:${JSON.stringify({
+    const cacheKey = `kitsu:catalog:v24:${normalizedCatalogId}:${JSON.stringify({
         skip,
         search,
         discover,
@@ -5465,7 +5464,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
 function getMetaCacheKey(type, id, config = null) {
     const resolvedConfig = getRequestConfig(config);
     const configHash = Object.keys(resolvedConfig).length > 0 ? JSON.stringify(resolvedConfig) : "default";
-    return `meta_v21:${type}:${id}:${configHash}`;
+    return `meta_v22:${type}:${id}:${configHash}`;
 }
 
 async function buildMetaForId(type, id, config = null) {
@@ -5515,8 +5514,9 @@ async function getCachedMetaForId(type, id, config = null) {
     try {
         const meta = await buildMetaForId(type, id, config);
         if (meta) {
-            await cache.set(cacheKey, meta, withTtlJitter(metaTtl));
-            return meta;
+            const alignedMeta = alignMetaIdentity(meta, id);
+            await cache.set(cacheKey, alignedMeta, withTtlJitter(metaTtl));
+            return alignedMeta;
         }
 
         await cache.set(cacheKey, createNegativeCache("meta_not_found"), NEGATIVE_CACHE_TTL_SECONDS);
