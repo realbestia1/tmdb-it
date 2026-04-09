@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="it">
 
 <head>
@@ -2097,7 +2097,7 @@
                                                 <span class="slider"></span>
                                             </label>
                                         </div>
-                                        <div class="input-hint">Se un tipo è disattivato, l'addon mantiene l'artwork
+                                        <div class="input-hint">Se un tipo Ã¨ disattivato, l'addon mantiene l'artwork
                                             originale.
                                         </div>
                                     </div>
@@ -2342,17 +2342,17 @@
                 <div class="step-shell">
                     <div class="catalog-list-container">
                         <div class="list-header">
-                            <div>
+                            <div style="width: 100%;">
                                 <div class="list-title-row">
                                     <div class="list-title">Cataloghi Configurati</div>
-                                    <div class="list-header-actions" aria-label="Azioni selezione ordinamento">
-                                        <button class="catalog-action-btn" type="button"
-                                            id="ordering-clear-selection-btn">Deseleziona</button>
-                                    </div>
                                 </div>
-                                <div class="list-subtitle">Questa e la lista completa dei cataloghi attivi. Trascina per
+                                <div class="list-subtitle">Questa è la lista completa dei cataloghi attivi. Trascina per
                                     cambiare posizione.</div>
-                                <div class="list-subtitle">Selezionando più cataloghi puoi spostarli contemporaneamente.
+                                <div class="list-title-row" style="margin-top: 0.2rem; align-items: center; justify-content: space-between; width: 100%;">
+                                    <div class="list-subtitle" style="flex: 1; min-width: 0;">Selezionando più cataloghi puoi spostarli contemporaneamente.</div>
+                                    <div class="list-header-actions" aria-label="Azioni selezione ordinamento" style="margin-left: auto; max-width: none; justify-content: flex-end; flex-shrink: 0;">
+                                        <button class="catalog-action-btn" type="button" id="ordering-clear-selection-btn">Deseleziona tutto</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3168,7 +3168,7 @@
 
         function getProviderModeLabel(slug) {
             const provider = PROVIDERS_BY_SLUG[slug];
-            const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " · Solo Serie" : "";
+            const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " Â· Solo Serie" : "";
             const isOriginal = !!catalogVisibility[`${slug}_original`];
             const isCatalog = !!catalogVisibility[`${slug}_catalog`];
             if (provider && !providerSupportsOriginal(provider)) {
@@ -3186,7 +3186,7 @@
 
             if (section === "top10") {
                 if (provider) {
-                    const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " · Solo Serie" : "";
+                    const seriesOnlySuffix = providerIsSeriesOnly(provider) ? " Â· Solo Serie" : "";
                     return {
                         renameId: id,
                         defaultName: `${provider.name} Top 10 Italia`,
@@ -3630,7 +3630,7 @@
                     .filter(catalog => catalog && typeof catalog === "object" && catalog.id && catalog.type)
                     .map(catalog => ({
                         id: buildCustomCatalogProxyId(manifestUrls[index], catalog),
-                        name: `${catalog.name || catalog.id} · ${addonName}`,
+                        name: `${catalog.name || catalog.id} Â· ${addonName}`,
                         type: catalog.type || "Catalogo",
                         source: addonName
                     }));
@@ -4854,3 +4854,4 @@
 </body>
 
 </html>
+
