@@ -5150,7 +5150,7 @@ const PROVIDERS_SERIES_ONLY = new Set(["Discovery+"]);
 
 const manifest = {
     id: "org.bestia.easycatalogs",
-    version: "1.1.0",
+    version: "1.1.1",
     name: "Easy Catalogs",
     description: "Easy Catalogs per Stremio",
     behaviorHints: {
@@ -5628,7 +5628,7 @@ async function getCachedMetaForId(type, id, config = null) {
 }
 
 
-async function fetchSpecialSeriesCatalogMetasFromCinemeta(catalogId, extra = {}, config = null) {
+async function fetchSpecialSeriesCatalogMetas(catalogId, extra = {}, config = null) {
     const extraName = catalogId === LAST_VIDEOS_CATALOG_ID
         ? LAST_VIDEOS_EXTRA_NAME
         : (catalogId === CALENDAR_VIDEOS_CATALOG_ID ? CALENDAR_VIDEOS_EXTRA_NAME : "");
@@ -5638,12 +5638,12 @@ async function fetchSpecialSeriesCatalogMetasFromCinemeta(catalogId, extra = {},
     if (requestedIds.length === 0) return [];
 
     const metas = await mapWithConcurrency(requestedIds, 4, async seriesId => {
-        const cinemetaMeta = await fetchCinemetaMeta(seriesId, "series");
-        if (!cinemetaMeta || !Array.isArray(cinemetaMeta.videos) || cinemetaMeta.videos.length === 0) {
+        const meta = await getCachedMetaForId("series", seriesId, config);
+        if (!meta || !Array.isArray(meta.videos) || meta.videos.length === 0) {
             return null;
         }
 
-        const alignedMeta = alignMetaIdentity(cinemetaMeta, seriesId);
+        const alignedMeta = alignMetaIdentity(meta, seriesId);
         const selectedVideos = selectSeriesVideosForSpecialCatalog(alignedMeta.videos, catalogId);
         if (selectedVideos.length === 0) return null;
 
@@ -5921,7 +5921,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         }
 
         if (type === "series" && (sourceCatalogId === LAST_VIDEOS_CATALOG_ID || sourceCatalogId === CALENDAR_VIDEOS_CATALOG_ID)) {
-            const metasDetailed = await fetchSpecialSeriesCatalogMetasFromCinemeta(sourceCatalogId, resolvedExtra, config);
+            const metasDetailed = await fetchSpecialSeriesCatalogMetas(sourceCatalogId, resolvedExtra, config);
             return { metasDetailed };
         }
 
