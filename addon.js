@@ -6642,7 +6642,7 @@ app.get('/manifest.json', async (req, res) => {
                         lookupKey,
                         customCatalogShapes
                     );
-                    if (isDiscoverOnly) {
+                    if (isDiscoverOnly && !isSearchCatalog(resolvedCatalog)) {
                         filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
@@ -6656,7 +6656,7 @@ app.get('/manifest.json', async (req, res) => {
                         lookupKey,
                         customCatalogShapes
                     );
-                    if (isDiscoverOnly) {
+                    if (isDiscoverOnly && !isSearchCatalog(resolvedCatalog)) {
                         filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
@@ -6687,7 +6687,7 @@ app.get('/manifest.json', async (req, res) => {
                         lookupKey,
                         customCatalogShapes
                     );
-                    if (isDiscoverOnly) {
+                    if (isDiscoverOnly && !isSearchCatalog(resolvedCatalog)) {
                         filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
