@@ -50,10 +50,10 @@ async function fetchCinemetaMeta(imdbId, type) {
     if (!imdbId) return null;
     try {
         const response = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
+        if (!response.ok) return null;
         const data = await response.json();
         return data && data.meta && typeof data.meta === "object" ? data.meta : null;
     } catch (e) {
-        console.warn(`Error fetching Cinemeta meta for ${imdbId}:`, e.message);
         return null;
     }
 }
